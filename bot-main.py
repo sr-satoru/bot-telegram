@@ -821,16 +821,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     links=links_list
                 )
                 
+                # Cria botões
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Finalizar", callback_data="voltar_start"),
+                        InlineKeyboardButton("➕ Novo Template", callback_data=f"criar_template_{canal_id}")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await update.message.reply_text(
                     f"✅ <b>Template salvo!</b>\n\n"
                     f"📝 ID: {template_id}\n"
                     f"🔗 Links: {num_links} (mesmo URL)\n"
                     f"🌐 URL: {link_url[:50]}...",
+                    reply_markup=reply_markup,
                     parse_mode='HTML'
                 )
                 
-                # Limpa o contexto
-                for key in ['criando_template', 'canal_id_template', 'etapa', 'pending_template',
+                # Limpa o contexto (mas mantém canal_id para novo template se necessário)
+                for key in ['criando_template', 'etapa', 'pending_template',
                            'original_message', 'links_received', 'current_link_index',
                            'use_same_link', 'waiting_for_link_choice']:
                     context.user_data.pop(key, None)
@@ -867,15 +877,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     links=context.user_data['links_received']
                 )
                 
+                # Cria botões
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Finalizar", callback_data="voltar_start"),
+                        InlineKeyboardButton("➕ Novo Template", callback_data=f"criar_template_{canal_id}")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await update.message.reply_text(
                     f"✅ <b>Template salvo!</b>\n\n"
                     f"📝 ID: {template_id}\n"
                     f"🔗 Links: {num_links}",
+                    reply_markup=reply_markup,
                     parse_mode='HTML'
                 )
                 
-                # Limpa o contexto
-                for key in ['criando_template', 'canal_id_template', 'etapa', 'pending_template',
+                # Limpa o contexto (mas mantém canal_id para novo template se necessário)
+                for key in ['criando_template', 'etapa', 'pending_template',
                            'original_message', 'links_received', 'current_link_index',
                            'use_same_link', 'waiting_for_link_choice']:
                     context.user_data.pop(key, None)
