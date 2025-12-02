@@ -30,6 +30,47 @@ parser = MessageParser()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /start"""
+    # Cancela qualquer fluxo de cadastro em andamento
+    keys_to_remove = [
+        'criando_canal',
+        'criando_template',
+        'etapa',
+        'nome_canal',
+        'ids_canal',
+        'horarios',
+        'canal_id_template',
+        'pending_template',
+        'original_message',
+        'links_received',
+        'current_link_index',
+        'use_same_link',
+        'waiting_for_link_choice',
+        'adicionando_inline_button',
+        'inline_button_template_id',
+        'inline_button_etapa',
+        'inline_button_text',
+        'editando_inline_button',
+        'inline_button_id',
+        'inline_button_new_text',
+        'adicionando_global_button',
+        'global_button_canal_id',
+        'global_button_etapa',
+        'global_button_text',
+        'editando_global_button',
+        'global_button_id',
+        'global_button_new_text',
+        'editing_all_links',
+        'editing_template_id',
+        'editing_num_links',
+        'editing_link_id',
+        'editing_segmento',
+        'editing_ordem',
+        'editando'
+    ]
+    
+    for key in keys_to_remove:
+        context.user_data.pop(key, None)
+    
     welcome_message = "🤖 <b>Bot de Vagas</b>\n\nEscolha uma opção:"
     
     # Cria botões inline
@@ -171,6 +212,164 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Menu para gerenciar horários
         await mostrar_menu_horarios_edicao(query, context)
     
+    elif query.data == "edit_global_buttons":
+        # Menu para gerenciar botões globais
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        
+        if not canal_id:
+            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            return
+        
+        global_buttons = db.get_global_buttons(canal_id)
+        
+        mensagem = "🔘 <b>Botões Globais</b>\n\n"
+        mensagem += "Botões globais são aplicados a TODOS os templates do canal.\n\n"
+        
+        if global_buttons:
+            mensagem += f"<b>Botões configurados ({len(global_buttons)}):</b>\n"
+            for i, button in enumerate(global_buttons, 1):
+                url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
+                mensagem += f"{i}. '{button['text']}'\n   → {url_display}\n\n"
+        else:
+            mensagem += "❌ Nenhum botão global configurado\n\n"
+        
+        keyboard = []
+        
+        for button in global_buttons:
+            button_display = button['text'][:25] + "..." if len(button['text']) > 25 else button['text']
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"✏️ {button_display}",
+                    callback_data=f"edit_global_button_{button['id']}"
+                ),
+                InlineKeyboardButton(
+                    f"🗑️",
+                    callback_data=f"deletar_global_button_{button['id']}"
+                )
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("➕ Adicionar Botão Global", callback_data=f"adicionar_global_button_{canal_id}")
+        ])
+        
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("adicionar_global_button_"):
+        # Inicia adição de botão global
+        canal_id = int(query.data.split("_")[-1])
+        
+        context.user_data['adicionando_global_button'] = True
+        context.user_data['global_button_canal_id'] = canal_id
+        context.user_data['global_button_etapa'] = 'texto'
+        
+        await query.edit_message_text(
+            "➕ <b>Adicionar Botão Global</b>\n\n"
+            "Este botão será aplicado a TODOS os templates do canal.\n\n"
+            "Envie o texto do botão:\n"
+            "Ex: <code>Clique aqui</code>",
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("edit_global_button_"):
+        # Edita um botão global
+        button_id = int(query.data.split("_")[-1])
+        
+        # Busca informações do botão
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT canal_id, button_text, button_url, ordem FROM canal_global_buttons WHERE id = ?', (button_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
+            return
+        
+        canal_id, button_text, button_url, ordem = result
+        
+        context.user_data['editando_global_button'] = True
+        context.user_data['global_button_id'] = button_id
+        context.user_data['global_button_canal_id'] = canal_id
+        context.user_data['global_button_etapa'] = 'texto'
+        
+        url_display = button_url if len(button_url) <= 50 else button_url[:47] + "..."
+        await query.edit_message_text(
+            f"✏️ <b>Editar Botão Global</b>\n\n"
+            f"📝 Texto atual: '{button_text}'\n"
+            f"🔗 URL atual: {url_display}\n\n"
+            f"Envie o novo texto do botão:",
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("deletar_global_button_"):
+        # Deleta um botão global
+        button_id = int(query.data.split("_")[-1])
+        
+        # Busca canal_id antes de deletar
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT canal_id FROM canal_global_buttons WHERE id = ?', (button_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
+            return
+        
+        canal_id = result[0]
+        
+        deleted = db.delete_global_button(button_id)
+        
+        if deleted:
+            # Volta para o menu de botões globais
+            global_buttons = db.get_global_buttons(canal_id)
+            
+            mensagem = "✅ <b>Botão global deletado!</b>\n\n"
+            mensagem += "🔘 <b>Botões Globais</b>\n\n"
+            mensagem += "Botões globais são aplicados a TODOS os templates do canal.\n\n"
+            
+            if global_buttons:
+                mensagem += f"<b>Botões configurados ({len(global_buttons)}):</b>\n"
+                for i, button in enumerate(global_buttons, 1):
+                    url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
+                    mensagem += f"{i}. '{button['text']}'\n   → {url_display}\n\n"
+            else:
+                mensagem += "❌ Nenhum botão global configurado\n\n"
+            
+            keyboard = []
+            
+            for button in global_buttons:
+                button_display = button['text'][:25] + "..." if len(button['text']) > 25 else button['text']
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"✏️ {button_display}",
+                        callback_data=f"edit_global_button_{button['id']}"
+                    ),
+                    InlineKeyboardButton(
+                        f"🗑️",
+                        callback_data=f"deletar_global_button_{button['id']}"
+                    )
+                ])
+            
+            keyboard.append([
+                InlineKeyboardButton("➕ Adicionar Botão Global", callback_data=f"adicionar_global_button_{canal_id}")
+            ])
+            
+            keyboard.append([
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        else:
+            await query.edit_message_text("❌ Erro ao deletar botão.", parse_mode='HTML')
+    
     elif query.data == "edit_salvar":
         # Salva as alterações
         dados = context.user_data.get('editando', {})
@@ -311,6 +510,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         template_mensagem = template['template_mensagem']
         links = template['links']  # Lista de dicionários com 'segmento' e 'link'
+        inline_buttons = template.get('inline_buttons', [])
+        canal_id = template.get('canal_id')
+        
+        # Busca botões globais do canal
+        global_buttons = []
+        if canal_id:
+            global_buttons = db.get_global_buttons(canal_id)
         
         # Converte para formato de tuplas (segmento, link_url)
         links_tuples = [(link['segmento'], link['link']) for link in links]
@@ -323,14 +529,43 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         preview_text += f"📄 <b>Mensagem formatada:</b>\n\n"
         preview_text += formatted_message
         
-        # Botões para voltar
-        keyboard = [
-            [
-                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates"),
-                InlineKeyboardButton("✏️ Editar Links", callback_data=f"edit_template_{template_id}")
-            ]
+        # Cria botões inline para preview (globais + individuais)
+        preview_keyboard = []
+        all_buttons = []
+        
+        # Adiciona botões globais primeiro
+        if global_buttons:
+            preview_text += f"\n\n🔘 <b>Botões Globais ({len(global_buttons)}):</b>\n"
+            for button in global_buttons:
+                preview_text += f"• 🌐 {button['text']} → {button['url'][:30]}...\n"
+                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
+        
+        # Adiciona botões individuais do template
+        if inline_buttons:
+            preview_text += f"\n🔘 <b>Botões do Template ({len(inline_buttons)}):</b>\n"
+            for button in inline_buttons:
+                preview_text += f"• {button['text']} → {button['url'][:30]}...\n"
+                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
+        
+        # Organiza botões em linhas (2 por linha)
+        if all_buttons:
+            button_row = []
+            for button in all_buttons:
+                button_row.append(button)
+                if len(button_row) >= 2:
+                    preview_keyboard.append(button_row)
+                    button_row = []
+            if button_row:
+                preview_keyboard.append(button_row)
+        
+        # Botões de navegação
+        nav_buttons = [
+            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates"),
+            InlineKeyboardButton("✏️ Editar", callback_data=f"edit_template_{template_id}")
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        preview_keyboard.append(nav_buttons)
+        
+        reply_markup = InlineKeyboardMarkup(preview_keyboard)
         
         await query.edit_message_text(preview_text, reply_markup=reply_markup, parse_mode='HTML')
     
@@ -458,6 +693,76 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
         return
+    
+    elif query.data.startswith("adicionar_inline_button_"):
+        # Inicia adição de botão inline
+        template_id = int(query.data.split("_")[-1])
+        
+        context.user_data['adicionando_inline_button'] = True
+        context.user_data['inline_button_template_id'] = template_id
+        context.user_data['inline_button_etapa'] = 'texto'
+        
+        await query.edit_message_text(
+            "➕ <b>Adicionar Botão Inline</b>\n\n"
+            "Envie o texto do botão:\n"
+            "Ex: <code>Clique aqui</code>",
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("edit_inline_button_"):
+        # Edita um botão inline
+        button_id = int(query.data.split("_")[-1])
+        
+        # Busca informações do botão
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT template_id, button_text, button_url, ordem FROM template_inline_buttons WHERE id = ?', (button_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
+            return
+        
+        template_id, button_text, button_url, ordem = result
+        
+        context.user_data['editando_inline_button'] = True
+        context.user_data['inline_button_id'] = button_id
+        context.user_data['inline_button_template_id'] = template_id
+        context.user_data['inline_button_etapa'] = 'texto'
+        
+        url_display = button_url if len(button_url) <= 50 else button_url[:47] + "..."
+        await query.edit_message_text(
+            f"✏️ <b>Editar Botão Inline</b>\n\n"
+            f"📝 Texto atual: '{button_text}'\n"
+            f"🔗 URL atual: {url_display}\n\n"
+            f"Envie o novo texto do botão:",
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("deletar_inline_button_"):
+        # Deleta um botão inline
+        button_id = int(query.data.split("_")[-1])
+        
+        # Busca template_id antes de deletar
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT template_id FROM template_inline_buttons WHERE id = ?', (button_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
+            return
+        
+        template_id = result[0]
+        
+        deleted = db.delete_inline_button(button_id)
+        
+        if deleted:
+            await show_edit_panel(query, template_id, context, "✅ Botão inline deletado!")
+        else:
+            await query.edit_message_text("❌ Erro ao deletar botão.", parse_mode='HTML')
     
     elif query.data.startswith("edit_link_"):
         # Edita um link específico
@@ -1061,49 +1366,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         )
                         return
                     
-                    # Adiciona o ID
+                    # Busca o nome do canal/grupo
+                    try:
+                        chat = await context.bot.get_chat(telegram_id)
+                        chat_title = chat.title or chat.username or f"Canal {telegram_id}"
+                    except Exception:
+                        chat_title = f"Canal {telegram_id}"
+                    
+                    # Verifica se o ID já existe
                     ids = dados.get('ids', [])
-                    if str(telegram_id) not in ids:
-                        ids.append(str(telegram_id))
-                        dados['ids'] = ids
-                        dados['changes_made'] = True
-                        del dados['etapa']
-                        
-                        # Envia mensagem e mostra menu de IDs
-                        msg = await update.message.reply_text(
-                            f"✅ ID <code>{telegram_id}</code> adicionado!",
-                            parse_mode='HTML'
-                        )
-                        
-                        # Mostra menu de IDs
-                        ids = dados.get('ids', [])
-                        mensagem = "🆔 <b>Gerenciar IDs</b>\n\n"
-                        
-                        if ids:
-                            mensagem += "<b>IDs configurados:</b>\n"
-                            for i, canal_id in enumerate(ids, 1):
-                                mensagem += f"{i}. <code>{canal_id}</code>\n"
-                        else:
-                            mensagem += "❌ Nenhum ID configurado\n"
-                        
-                        mensagem += f"\nTotal: {len(ids)} ID(s)"
-                        
-                        keyboard = [
-                            [InlineKeyboardButton("➕ Adicionar ID", callback_data="edit_add_id")],
-                        ]
-                        
-                        if ids:
-                            keyboard.append([InlineKeyboardButton("🗑 Remover ID", callback_data="edit_remove_id")])
-                        
-                        keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")])
-                        
-                        reply_markup = InlineKeyboardMarkup(keyboard)
-                        await msg.edit_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
-                    else:
+                    if str(telegram_id) in ids:
                         await update.message.reply_text(
-                            "⚠️ Este ID já está na lista.",
+                            f"⚠️ ID <code>{telegram_id}</code> já foi adicionado.\n\n"
+                            f"IDs atuais ({len(ids)}):\n" +
+                            "\n".join([f"{i}. <code>{cid}</code>" for i, cid in enumerate(ids, 1)]),
                             parse_mode='HTML'
                         )
+                        return
+                    
+                    # Adiciona o ID
+                    ids.append(str(telegram_id))
+                    dados['ids'] = ids
+                    dados['changes_made'] = True
+                    del dados['etapa']
+                    
+                    # Envia mensagem e mostra menu de IDs
+                    msg = await update.message.reply_text(
+                        f"✅ ID <code>{telegram_id}</code> adicionado!\n"
+                        f"📝 <b>Nome:</b> {chat_title}",
+                        parse_mode='HTML'
+                    )
+                    
+                    # Mostra menu de IDs
+                    ids_atualizados = dados.get('ids', [])
+                    mensagem = "🆔 <b>Gerenciar IDs</b>\n\n"
+                    
+                    if ids_atualizados:
+                        mensagem += "<b>IDs configurados:</b>\n"
+                        for i, canal_id_str in enumerate(ids_atualizados, 1):
+                            try:
+                                canal_id_int = int(canal_id_str)
+                                try:
+                                    chat = await context.bot.get_chat(canal_id_int)
+                                    chat_title = chat.title or chat.username or f"Canal {canal_id_str}"
+                                    mensagem += f"{i}. <code>{canal_id_str}</code> - {chat_title}\n"
+                                except Exception:
+                                    mensagem += f"{i}. <code>{canal_id_str}</code>\n"
+                            except ValueError:
+                                mensagem += f"{i}. <code>{canal_id_str}</code>\n"
+                    else:
+                        mensagem += "❌ Nenhum ID configurado\n"
+                    
+                    mensagem += f"\nTotal: {len(ids_atualizados)} ID(s)"
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("➕ Adicionar ID", callback_data="edit_add_id")],
+                    ]
+                    
+                    if ids_atualizados:
+                        keyboard.append([InlineKeyboardButton("🗑 Remover ID", callback_data="edit_remove_id")])
+                    
+                    keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")])
+                    
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await msg.edit_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
                         
                 except Exception as e:
                     error_msg = str(e).lower()
@@ -1242,13 +1568,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         )
                         return
                     
+                    # Busca o nome do canal/grupo
+                    try:
+                        chat = await context.bot.get_chat(telegram_id)
+                        chat_title = chat.title or chat.username or f"Canal {telegram_id}"
+                    except Exception:
+                        chat_title = f"Canal {telegram_id}"
+                    
                     # Inicializa lista de IDs se não existir
                     if 'ids_canal' not in context.user_data:
                         context.user_data['ids_canal'] = []
                     
-                    # Adiciona o ID à lista (evita duplicatas)
-                    if telegram_id not in context.user_data['ids_canal']:
-                        context.user_data['ids_canal'].append(telegram_id)
+                    # Verifica se o ID já existe
+                    if telegram_id in context.user_data['ids_canal']:
+                        await update.message.reply_text(
+                            f"⚠️ ID <code>{telegram_id}</code> já foi adicionado.\n\n"
+                            f"IDs atuais ({len(context.user_data['ids_canal'])}):\n" +
+                            "\n".join([f"{i}. <code>{cid}</code>" for i, cid in enumerate(context.user_data['ids_canal'], 1)]),
+                            parse_mode='HTML'
+                        )
+                        return
+                    
+                    # Adiciona o ID à lista
+                    context.user_data['ids_canal'].append(telegram_id)
                     
                     # Conta total de IDs
                     total_ids = len(context.user_data['ids_canal'])
@@ -1257,11 +1599,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     mensagem = f"✅ <b>Canal adicionado!</b>\n\n"
                     mensagem += f"📢 {nome_canal}\n"
                     mensagem += f"🆔 <code>{telegram_id}</code>\n"
+                    mensagem += f"📝 <b>Nome:</b> {chat_title}\n"
                     mensagem += f"✅ Bot é admin\n\n"
                     mensagem += f"<b>IDs ({total_ids}):</b>\n"
                     
                     for i, canal_id in enumerate(context.user_data['ids_canal'], 1):
-                        mensagem += f"{i}. <code>{canal_id}</code>\n"
+                        # Tenta buscar o nome do canal
+                        try:
+                            chat = await context.bot.get_chat(canal_id)
+                            chat_title = chat.title or chat.username or f"Canal {canal_id}"
+                            mensagem += f"{i}. <code>{canal_id}</code> - {chat_title}\n"
+                        except Exception:
+                            mensagem += f"{i}. <code>{canal_id}</code>\n"
                     
                     # Cria botões
                     keyboard = [
@@ -1349,6 +1698,299 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Mostra menu de horários
             await mostrar_menu_horarios_text(msg, context)
+            return
+    
+    # Verifica se está adicionando botão global
+    if context.user_data.get('adicionando_global_button', False):
+        etapa = context.user_data.get('global_button_etapa')
+        canal_id = context.user_data.get('global_button_canal_id')
+        
+        if etapa == 'texto':
+            # Recebeu o texto do botão
+            button_text = message_text.strip()
+            
+            if not button_text:
+                await update.message.reply_text("⚠️ Texto do botão não pode estar vazio.", parse_mode='HTML')
+                return
+            
+            context.user_data['global_button_text'] = button_text
+            context.user_data['global_button_etapa'] = 'url'
+            
+            await update.message.reply_text(
+                f"✅ Texto: <b>{button_text}</b>\n\n"
+                f"Envie o URL do botão:\n"
+                f"Ex: <code>https://example.com</code>",
+                parse_mode='HTML'
+            )
+            return
+        
+        elif etapa == 'url':
+            # Recebeu o URL do botão
+            button_url = message_text.strip()
+            
+            if not (button_url.startswith('http://') or button_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    parse_mode='HTML'
+                )
+                return
+            
+            button_text = context.user_data.get('global_button_text')
+            
+            # Busca botões existentes e adiciona novo
+            existing_buttons = db.get_global_buttons(canal_id)
+            buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons]
+            buttons_list.append((button_text, button_url))
+            db.save_global_buttons(canal_id, buttons_list)
+            
+            # Limpa contexto
+            for key in ['adicionando_global_button', 'global_button_canal_id', 
+                       'global_button_etapa', 'global_button_text']:
+                context.user_data.pop(key, None)
+            
+            # Retorna ao menu de botões globais
+            dados = context.user_data.get('editando', {})
+            dados['canal_id'] = canal_id
+            
+            global_buttons = db.get_global_buttons(canal_id)
+            
+            mensagem = "✅ <b>Botão global adicionado!</b>\n\n"
+            mensagem += "🔘 <b>Botões Globais</b>\n\n"
+            mensagem += "Botões globais são aplicados a TODOS os templates do canal.\n\n"
+            
+            if global_buttons:
+                mensagem += f"<b>Botões configurados ({len(global_buttons)}):</b>\n"
+                for i, button in enumerate(global_buttons, 1):
+                    url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
+                    mensagem += f"{i}. '{button['text']}'\n   → {url_display}\n\n"
+            else:
+                mensagem += "❌ Nenhum botão global configurado\n\n"
+            
+            keyboard = []
+            
+            for button in global_buttons:
+                button_display = button['text'][:25] + "..." if len(button['text']) > 25 else button['text']
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"✏️ {button_display}",
+                        callback_data=f"edit_global_button_{button['id']}"
+                    ),
+                    InlineKeyboardButton(
+                        f"🗑️",
+                        callback_data=f"deletar_global_button_{button['id']}"
+                    )
+                ])
+            
+            keyboard.append([
+                InlineKeyboardButton("➕ Adicionar Botão Global", callback_data=f"adicionar_global_button_{canal_id}")
+            ])
+            
+            keyboard.append([
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            msg = await update.message.reply_text("✅ Botão global adicionado!", parse_mode='HTML')
+            await msg.edit_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+            return
+    
+    # Verifica se está editando botão global
+    if context.user_data.get('editando_global_button', False):
+        etapa = context.user_data.get('global_button_etapa')
+        button_id = context.user_data.get('global_button_id')
+        canal_id = context.user_data.get('global_button_canal_id')
+        
+        if etapa == 'texto':
+            # Recebeu novo texto
+            new_text = message_text.strip()
+            
+            if not new_text:
+                await update.message.reply_text("⚠️ Texto não pode estar vazio.", parse_mode='HTML')
+                return
+            
+            context.user_data['global_button_new_text'] = new_text
+            context.user_data['global_button_etapa'] = 'url'
+            
+            await update.message.reply_text(
+                f"✅ Novo texto: <b>{new_text}</b>\n\n"
+                f"Envie o novo URL:\n"
+                f"Ex: <code>https://example.com</code>",
+                parse_mode='HTML'
+            )
+            return
+        
+        elif etapa == 'url':
+            # Recebeu novo URL
+            new_url = message_text.strip()
+            
+            if not (new_url.startswith('http://') or new_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    parse_mode='HTML'
+                )
+                return
+            
+            new_text = context.user_data.get('global_button_new_text')
+            
+            # Busca botões existentes, remove o antigo e adiciona o novo
+            existing_buttons = db.get_global_buttons(canal_id)
+            buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons if btn['id'] != button_id]
+            buttons_list.append((new_text, new_url))
+            db.save_global_buttons(canal_id, buttons_list)
+            
+            # Limpa contexto
+            for key in ['editando_global_button', 'global_button_id', 'global_button_canal_id',
+                       'global_button_etapa', 'global_button_new_text']:
+                context.user_data.pop(key, None)
+            
+            # Retorna ao menu de botões globais
+            global_buttons = db.get_global_buttons(canal_id)
+            
+            mensagem = "✅ <b>Botão global atualizado!</b>\n\n"
+            mensagem += "🔘 <b>Botões Globais</b>\n\n"
+            mensagem += "Botões globais são aplicados a TODOS os templates do canal.\n\n"
+            
+            if global_buttons:
+                mensagem += f"<b>Botões configurados ({len(global_buttons)}):</b>\n"
+                for i, button in enumerate(global_buttons, 1):
+                    url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
+                    mensagem += f"{i}. '{button['text']}'\n   → {url_display}\n\n"
+            else:
+                mensagem += "❌ Nenhum botão global configurado\n\n"
+            
+            keyboard = []
+            
+            for button in global_buttons:
+                button_display = button['text'][:25] + "..." if len(button['text']) > 25 else button['text']
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"✏️ {button_display}",
+                        callback_data=f"edit_global_button_{button['id']}"
+                    ),
+                    InlineKeyboardButton(
+                        f"🗑️",
+                        callback_data=f"deletar_global_button_{button['id']}"
+                    )
+                ])
+            
+            keyboard.append([
+                InlineKeyboardButton("➕ Adicionar Botão Global", callback_data=f"adicionar_global_button_{canal_id}")
+            ])
+            
+            keyboard.append([
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            msg = await update.message.reply_text("✅ Botão atualizado!", parse_mode='HTML')
+            await msg.edit_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+            return
+    
+    # Verifica se está adicionando botão inline
+    if context.user_data.get('adicionando_inline_button', False):
+        etapa = context.user_data.get('inline_button_etapa')
+        template_id = context.user_data.get('inline_button_template_id')
+        
+        if etapa == 'texto':
+            # Recebeu o texto do botão
+            button_text = message_text.strip()
+            
+            if not button_text:
+                await update.message.reply_text("⚠️ Texto do botão não pode estar vazio.", parse_mode='HTML')
+                return
+            
+            context.user_data['inline_button_text'] = button_text
+            context.user_data['inline_button_etapa'] = 'url'
+            
+            await update.message.reply_text(
+                f"✅ Texto: <b>{button_text}</b>\n\n"
+                f"Envie o URL do botão:\n"
+                f"Ex: <code>https://example.com</code>",
+                parse_mode='HTML'
+            )
+            return
+        
+        elif etapa == 'url':
+            # Recebeu o URL do botão
+            button_url = message_text.strip()
+            
+            if not (button_url.startswith('http://') or button_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    parse_mode='HTML'
+                )
+                return
+            
+            button_text = context.user_data.get('inline_button_text')
+            
+            # Busca botões existentes e adiciona novo
+            existing_buttons = db.get_inline_buttons(template_id)
+            buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons]
+            buttons_list.append((button_text, button_url))
+            db.save_inline_buttons(template_id, buttons_list)
+            
+            # Limpa contexto
+            for key in ['adicionando_inline_button', 'inline_button_template_id', 
+                       'inline_button_etapa', 'inline_button_text']:
+                context.user_data.pop(key, None)
+            
+            # Retorna ao painel de edição
+            msg = await update.message.reply_text("✅ Botão inline adicionado!", parse_mode='HTML')
+            await show_edit_panel(msg, template_id, context, f"✅ Botão '{button_text}' adicionado!")
+            return
+    
+    # Verifica se está editando botão inline
+    if context.user_data.get('editando_inline_button', False):
+        etapa = context.user_data.get('inline_button_etapa')
+        button_id = context.user_data.get('inline_button_id')
+        template_id = context.user_data.get('inline_button_template_id')
+        
+        if etapa == 'texto':
+            # Recebeu novo texto
+            new_text = message_text.strip()
+            
+            if not new_text:
+                await update.message.reply_text("⚠️ Texto não pode estar vazio.", parse_mode='HTML')
+                return
+            
+            context.user_data['inline_button_new_text'] = new_text
+            context.user_data['inline_button_etapa'] = 'url'
+            
+            await update.message.reply_text(
+                f"✅ Novo texto: <b>{new_text}</b>\n\n"
+                f"Envie o novo URL:\n"
+                f"Ex: <code>https://example.com</code>",
+                parse_mode='HTML'
+            )
+            return
+        
+        elif etapa == 'url':
+            # Recebeu novo URL
+            new_url = message_text.strip()
+            
+            if not (new_url.startswith('http://') or new_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    parse_mode='HTML'
+                )
+                return
+            
+            new_text = context.user_data.get('inline_button_new_text')
+            
+            # Busca botões existentes, remove o antigo e adiciona o novo
+            existing_buttons = db.get_inline_buttons(template_id)
+            buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons if btn['id'] != button_id]
+            buttons_list.append((new_text, new_url))
+            db.save_inline_buttons(template_id, buttons_list)
+            
+            # Limpa contexto
+            for key in ['editando_inline_button', 'inline_button_id', 'inline_button_template_id',
+                       'inline_button_etapa', 'inline_button_new_text']:
+                context.user_data.pop(key, None)
+            
+            # Retorna ao painel
+            msg = await update.message.reply_text("✅ Botão atualizado!", parse_mode='HTML')
+            await show_edit_panel(msg, template_id, context, f"✅ Botão atualizado para '{new_text}'!")
             return
     
     # Verifica se está editando links de template
@@ -1522,6 +2164,9 @@ async def mostrar_menu_edicao(query, context):
         [
             InlineKeyboardButton("📝 Gerenciar Templates", callback_data="edit_templates"),
         ],
+        [
+            InlineKeyboardButton("🔘 Botões Globais", callback_data="edit_global_buttons"),
+        ],
     ]
     
     if dados.get('changes_made', False):
@@ -1546,8 +2191,17 @@ async def mostrar_menu_ids(query, context):
     
     if ids:
         mensagem += "<b>IDs configurados:</b>\n"
-        for i, canal_id in enumerate(ids, 1):
-            mensagem += f"{i}. <code>{canal_id}</code>\n"
+        for i, canal_id_str in enumerate(ids, 1):
+            try:
+                canal_id_int = int(canal_id_str)
+                try:
+                    chat = await context.bot.get_chat(canal_id_int)
+                    chat_title = chat.title or chat.username or f"Canal {canal_id_str}"
+                    mensagem += f"{i}. <code>{canal_id_str}</code> - {chat_title}\n"
+                except Exception:
+                    mensagem += f"{i}. <code>{canal_id_str}</code>\n"
+            except ValueError:
+                mensagem += f"{i}. <code>{canal_id_str}</code>\n"
     else:
         mensagem += "❌ Nenhum ID configurado\n"
     
@@ -1621,6 +2275,7 @@ async def show_edit_panel(query_or_message, template_id: int, context, success_m
     
     template_mensagem = template['template_mensagem']
     links = template['links']  # [(link_id, segmento, url, ordem), ...]
+    inline_buttons = template.get('inline_buttons', [])  # Lista de dicionários
     
     # Monta mensagem
     message_text = f"📝 <b>Template ID: {template_id}</b>\n\n"
@@ -1650,6 +2305,38 @@ async def show_edit_panel(query_or_message, template_id: int, context, success_m
         keyboard.append([
             InlineKeyboardButton("🔗 Editar todos para o mesmo link", callback_data=f"edit_all_{template_id}")
         ])
+    
+    # Seção de botões inline
+    message_text += f"\n🔘 <b>Botões Inline ({len(inline_buttons)}):</b>\n\n"
+    if inline_buttons:
+        for button in inline_buttons:
+            button_text = button['text']
+            button_url = button['url']
+            button_id = button['id']
+            ordem = button['ordem']
+            url_display = button_url if len(button_url) <= 40 else button_url[:37] + "..."
+            message_text += f"{ordem}. '{button_text}'\n   → {url_display}\n\n"
+            
+            button_display = button_text[:20] + "..." if len(button_text) > 20 else button_text
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"✏️ Botão {ordem}: {button_display}",
+                    callback_data=f"edit_inline_button_{button_id}"
+                )
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🗑️ Deletar Botão {ordem}",
+                    callback_data=f"deletar_inline_button_{button_id}"
+                )
+            ])
+    else:
+        message_text += "❌ Nenhum botão inline\n\n"
+    
+    # Botão para adicionar botão inline
+    keyboard.append([
+        InlineKeyboardButton("➕ Adicionar Botão Inline", callback_data=f"adicionar_inline_button_{template_id}")
+    ])
     
     # Botões de navegação
     dados = context.user_data.get('editando', {})

@@ -71,6 +71,30 @@ class Database:
             )
         ''')
         
+        # Tabela de botões inline dos templates (relação 1:N com templates)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS template_inline_buttons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id INTEGER NOT NULL,
+                button_text TEXT NOT NULL,
+                button_url TEXT NOT NULL,
+                ordem INTEGER NOT NULL,
+                FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Tabela de botões inline globais (relação 1:N com canais)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS canal_global_buttons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                canal_id INTEGER NOT NULL,
+                button_text TEXT NOT NULL,
+                button_url TEXT NOT NULL,
+                ordem INTEGER NOT NULL,
+                FOREIGN KEY (canal_id) REFERENCES canais(id) ON DELETE CASCADE
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -344,6 +368,23 @@ class Database:
                 'ordem': ordem
             })
         
+        # Busca os botões inline do template
+        cursor.execute('''
+            SELECT id, button_text, button_url, ordem
+            FROM template_inline_buttons
+            WHERE template_id = ?
+            ORDER BY ordem
+        ''', (template_id_db,))
+        
+        inline_buttons = []
+        for button_id, button_text, button_url, ordem in cursor.fetchall():
+            inline_buttons.append({
+                'id': button_id,
+                'text': button_text,
+                'url': button_url,
+                'ordem': ordem
+            })
+        
         conn.close()
         
         return {
@@ -351,6 +392,7 @@ class Database:
             'canal_id': canal_id,
             'template_mensagem': template_mensagem,
             'links': links,
+            'inline_buttons': inline_buttons,
             'created_at': created_at
         }
     
@@ -388,11 +430,28 @@ class Database:
                     'ordem': ordem
                 })
             
+            # Busca botões inline de cada template
+            cursor.execute('''
+                SELECT button_text, button_url, ordem
+                FROM template_inline_buttons
+                WHERE template_id = ?
+                ORDER BY ordem
+            ''', (template_id,))
+            
+            inline_buttons = []
+            for button_text, button_url, ordem in cursor.fetchall():
+                inline_buttons.append({
+                    'text': button_text,
+                    'url': button_url,
+                    'ordem': ordem
+                })
+            
             results.append({
                 'id': template_id,
                 'canal_id': canal_id,
                 'template_mensagem': template_mensagem,
                 'links': links,
+                'inline_buttons': inline_buttons,
                 'created_at': created_at
             })
         
@@ -472,6 +531,23 @@ class Database:
         for link_id, segmento, link_url, ordem in cursor.fetchall():
             links.append((link_id, segmento, link_url, ordem))
         
+        # Busca botões inline com IDs
+        cursor.execute('''
+            SELECT id, button_text, button_url, ordem
+            FROM template_inline_buttons
+            WHERE template_id = ?
+            ORDER BY ordem
+        ''', (template_id_db,))
+        
+        inline_buttons = []
+        for button_id, button_text, button_url, ordem in cursor.fetchall():
+            inline_buttons.append({
+                'id': button_id,
+                'text': button_text,
+                'url': button_url,
+                'ordem': ordem
+            })
+        
         conn.close()
         
         return {
@@ -479,6 +555,7 @@ class Database:
             'canal_id': canal_id,
             'template_mensagem': template_mensagem,
             'links': links,
+            'inline_buttons': inline_buttons,
             'created_at': created_at
         }
     
@@ -501,9 +578,137 @@ class Database:
         
         return result
     
+    def save_inline_buttons(self, template_id: int, buttons: List[Tuple[str, str]]) -> bool:
+        """
+        Salva botões inline para um template
+        buttons: Lista de tuplas (button_text, button_url)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Remove botões antigos
+        cursor.execute('DELETE FROM template_inline_buttons WHERE template_id = ?', (template_id,))
+        
+        # Insere novos botões
+        for ordem, (button_text, button_url) in enumerate(buttons, start=1):
+            cursor.execute('''
+                INSERT INTO template_inline_buttons (template_id, button_text, button_url, ordem)
+                VALUES (?, ?, ?, ?)
+            ''', (template_id, button_text, button_url, ordem))
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+    
+    def get_inline_buttons(self, template_id: int) -> List[Dict]:
+        """
+        Recupera botões inline de um template
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, button_text, button_url, ordem
+            FROM template_inline_buttons
+            WHERE template_id = ?
+            ORDER BY ordem
+        ''', (template_id,))
+        
+        buttons = []
+        for button_id, button_text, button_url, ordem in cursor.fetchall():
+            buttons.append({
+                'id': button_id,
+                'text': button_text,
+                'url': button_url,
+                'ordem': ordem
+            })
+        
+        conn.close()
+        return buttons
+    
+    def delete_inline_button(self, button_id: int) -> bool:
+        """
+        Deleta um botão inline específico
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM template_inline_buttons WHERE id = ?', (button_id,))
+        
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return deleted
+    
+    def save_global_buttons(self, canal_id: int, buttons: List[Tuple[str, str]]) -> bool:
+        """
+        Salva botões inline globais para um canal
+        buttons: Lista de tuplas (button_text, button_url)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Remove botões antigos
+        cursor.execute('DELETE FROM canal_global_buttons WHERE canal_id = ?', (canal_id,))
+        
+        # Insere novos botões
+        for ordem, (button_text, button_url) in enumerate(buttons, start=1):
+            cursor.execute('''
+                INSERT INTO canal_global_buttons (canal_id, button_text, button_url, ordem)
+                VALUES (?, ?, ?, ?)
+            ''', (canal_id, button_text, button_url, ordem))
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+    
+    def get_global_buttons(self, canal_id: int) -> List[Dict]:
+        """
+        Recupera botões inline globais de um canal
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, button_text, button_url, ordem
+            FROM canal_global_buttons
+            WHERE canal_id = ?
+            ORDER BY ordem
+        ''', (canal_id,))
+        
+        buttons = []
+        for button_id, button_text, button_url, ordem in cursor.fetchall():
+            buttons.append({
+                'id': button_id,
+                'text': button_text,
+                'url': button_url,
+                'ordem': ordem
+            })
+        
+        conn.close()
+        return buttons
+    
+    def delete_global_button(self, button_id: int) -> bool:
+        """
+        Deleta um botão inline global específico
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM canal_global_buttons WHERE id = ?', (button_id,))
+        
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return deleted
+    
     def delete_template(self, template_id: int) -> bool:
         """
-        Deleta um template e todos os seus links
+        Deleta um template e todos os seus links e botões inline
         """
         conn = self.get_connection()
         cursor = conn.cursor()
