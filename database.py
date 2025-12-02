@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, Dict
 logger = logging.getLogger(__name__)
 
 class Database:
-    def __init__(self, db_path: str = "bot_vagas.db"):
+    def __init__(self, db_path: str = "bot_postagens_canais.db"):
         self.db_path = db_path
         self.init_database()
     

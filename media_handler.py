@@ -366,12 +366,14 @@ class MediaHandler:
             for button in global_buttons:
                 all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
         
-        # Organiza botões em linhas de 2
+        # Organiza botões: se houver 2 ou mais, um abaixo do outro (um por linha)
         if all_buttons:
-            button_rows = []
-            for i in range(0, len(all_buttons), 2):
-                row = all_buttons[i:i+2]
-                button_rows.append(row)
+            if len(all_buttons) >= 2:
+                # Quando há 2 ou mais botões, cada um fica em sua própria linha
+                button_rows = [[button] for button in all_buttons]
+            else:
+                # Se houver apenas 1 botão, mantém como está
+                button_rows = [all_buttons]
             reply_markup = InlineKeyboardMarkup(button_rows)
             logger.info(f"Preparando {len(all_buttons)} botões inline para media group {media_group.get('id')}")
         else:
