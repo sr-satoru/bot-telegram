@@ -211,5 +211,83 @@ class Database:
         conn.close()
         return results
     
+    def get_template_with_link_ids(self, template_id: int) -> Optional[dict]:
+        """
+        Recupera um template pelo ID com todos os seus links incluindo IDs dos links
+        Retorna um dicionário: {'id': int, 'template_mensagem': str, 'links': [(link_id, segmento, url, ordem), ...]}
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Busca o template
+        cursor.execute('''
+            SELECT id, template_mensagem, created_at
+            FROM templates
+            WHERE id = ?
+        ''', (template_id,))
+        
+        template_row = cursor.fetchone()
+        if not template_row:
+            conn.close()
+            return None
+        
+        template_id, template_mensagem, created_at = template_row
+        
+        # Busca os links do template com IDs
+        cursor.execute('''
+            SELECT id, segmento_com_link, link_da_mensagem, ordem
+            FROM template_links
+            WHERE template_id = ?
+            ORDER BY ordem
+        ''', (template_id,))
+        
+        links = cursor.fetchall()
+        conn.close()
+        
+        return {
+            'id': template_id,
+            'template_mensagem': template_mensagem,
+            'links': links,  # [(link_id, segmento, url, ordem), ...]
+            'created_at': created_at
+        }
+    
+    def update_link(self, link_id: int, new_url: str) -> bool:
+        """
+        Atualiza o URL de um link específico
+        Retorna True se atualizado com sucesso, False caso contrário
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE template_links
+            SET link_da_mensagem = ?
+            WHERE id = ?
+        ''', (new_url, link_id))
+        
+        updated = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return updated
+    
+    def get_link_info(self, link_id: int) -> Optional[Tuple]:
+        """
+        Recupera informações de um link pelo ID
+        Retorna (link_id, template_id, segmento, url, ordem) ou None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, template_id, segmento_com_link, link_da_mensagem, ordem
+            FROM template_links
+            WHERE id = ?
+        ''', (link_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result
 
 

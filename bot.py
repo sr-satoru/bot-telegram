@@ -42,12 +42,12 @@ Este bot permite salvar mensagens com templates que contêm links.
    • Usar links diferentes para cada segmento
 
 3. Use /enviar <id> para enviar um template formatado
+4. Use /editar <id> para editar os links dos segmentos de um template
 
 Comandos disponíveis:
 /start - Mostra esta mensagem
-/listar - Lista todos os templates
-/enviar <id> - Envia um template (você precisará fornecer o link)
-/help - Mostra ajuda
+/enviar <id> - Envia um template formatado
+/editar <id> - Edita os links dos segmentos de um template
 """
     await update.message.reply_text(welcome_message)
 
@@ -104,6 +104,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['waiting_for_link_choice'] = False
             await update.message.reply_text(response)
     else:
+        # Verifica se está editando um link
+        if 'editing_link_id' in context.user_data:
+            link_url = message_text.strip()
+            
+            # Valida se parece ser uma URL
+            if not (link_url.startswith('http://') or link_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ Por favor, envie uma URL válida começando com http:// ou https://"
+                )
+                return
+            
+            # Atualiza o link
+            link_id = context.user_data['editing_link_id']
+            template_id = context.user_data['editing_template_id']
+            segmento = context.user_data['editing_segmento']
+            ordem = context.user_data['editing_ordem']
+            
+            updated = db.update_link(link_id, link_url)
+            
+            if updated:
+                # Limpa o contexto de edição
+                del context.user_data['editing_link_id']
+                del context.user_data['editing_template_id']
+                del context.user_data['editing_segmento']
+                del context.user_data['editing_ordem']
+                
+                # Retorna ao painel de edição com mensagem de sucesso
+                url_display = link_url if len(link_url) <= 50 else link_url[:47] + "..."
+                success_msg = f"Segmento {ordem} ('{segmento}') atualizado: {url_display}"
+                await show_edit_panel(update, template_id, success_msg)
+            else:
+                await update.message.reply_text(
+                    "❌ Erro ao atualizar o link. Por favor, tente novamente."
+                )
+                # Mantém o contexto para tentar novamente
+            return
+        
         # Verifica se há um template pendente esperando pelos links
         if 'pending_template' in context.user_data:
             template_data = context.user_data['pending_template']
@@ -255,6 +292,122 @@ async def handle_link_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"Exemplo: https://example.com"
         )
 
+async def show_edit_panel(update_or_query, template_id: int, success_message: str = None):
+    """
+    Função auxiliar para mostrar o painel de edição
+    Pode receber Update ou CallbackQuery
+    """
+    template = db.get_template_with_link_ids(template_id)
+    
+    if not template:
+        if hasattr(update_or_query, 'edit_message_text'):
+            await update_or_query.edit_message_text(f"❌ Template com ID {template_id} não encontrado.")
+        else:
+            await update_or_query.message.reply_text(f"❌ Template com ID {template_id} não encontrado.")
+        return
+    
+    template_mensagem = template['template_mensagem']
+    links = template['links']  # [(link_id, segmento, url, ordem), ...]
+    
+    # Monta a mensagem com os segmentos
+    message_text = f"📝 Template ID: {template_id}\n\n"
+    message_text += f"📄 Mensagem:\n{template_mensagem}\n\n"
+    
+    if success_message:
+        message_text += f"✅ {success_message}\n\n"
+    
+    message_text += f"🔗 Segmentos ({len(links)}):\n\n"
+    
+    # Cria botões inline para cada segmento
+    keyboard = []
+    for link_id, segmento, url, ordem in links:
+        # Trunca URL se muito longo para exibição
+        url_display = url if len(url) <= 40 else url[:37] + "..."
+        message_text += f"{ordem}. '{segmento}'\n   → {url_display}\n\n"
+        
+        # Botão para editar este segmento
+        segmento_display = segmento[:20] + "..." if len(segmento) > 20 else segmento
+        keyboard.append([
+            InlineKeyboardButton(
+                f"✏️ Editar segmento {ordem}: {segmento_display}",
+                callback_data=f"edit_link_{link_id}"
+            )
+        ])
+    
+    # Botão para cancelar
+    keyboard.append([
+        InlineKeyboardButton("❌ Cancelar", callback_data="edit_cancel")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Envia ou edita a mensagem dependendo do tipo
+    if hasattr(update_or_query, 'edit_message_text'):
+        await update_or_query.edit_message_text(
+            message_text,
+            reply_markup=reply_markup
+        )
+    else:
+        await update_or_query.message.reply_text(
+            message_text,
+            reply_markup=reply_markup
+        )
+
+async def edit_segment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler para o comando /editar"""
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ Use: /editar <id>\n"
+            "Exemplo: /editar 1\n\n"
+            "Este comando permite editar os links dos segmentos de uma mensagem."
+        )
+        return
+    
+    try:
+        template_id = int(context.args[0])
+        await show_edit_panel(update, template_id)
+        
+    except ValueError:
+        await update.message.reply_text("⚠️ ID deve ser um número.")
+    except Exception as e:
+        logger.error(f"Erro ao editar template: {e}")
+        await update.message.reply_text(f"❌ Erro ao editar template: {str(e)}")
+
+async def handle_edit_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler para processar a edição de links via botões inline"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "edit_cancel":
+        await query.edit_message_text("❌ Edição cancelada.")
+        return
+    
+    if query.data.startswith("edit_link_"):
+        link_id = int(query.data.split("_")[-1])
+        
+        # Busca informações do link
+        link_info = db.get_link_info(link_id)
+        
+        if not link_info:
+            await query.edit_message_text("❌ Link não encontrado.")
+            return
+        
+        link_id_db, template_id, segmento, url_atual, ordem = link_info
+        
+        # Salva o contexto para edição
+        context.user_data['editing_link_id'] = link_id
+        context.user_data['editing_template_id'] = template_id
+        context.user_data['editing_segmento'] = segmento
+        context.user_data['editing_ordem'] = ordem
+        
+        await query.edit_message_text(
+            f"✏️ Editando segmento {ordem}\n\n"
+            f"📝 Segmento: '{segmento}'\n"
+            f"🔗 URL atual: {url_atual}\n\n"
+            f"Envie o novo URL para este segmento:\n"
+            f"Exemplo: https://example.com"
+        )
+
 async def send_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /enviar"""
     if not context.args:
@@ -297,7 +450,9 @@ def main():
     # Adiciona handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("enviar", send_template))
+    application.add_handler(CommandHandler("editar", edit_segment))
     application.add_handler(CallbackQueryHandler(handle_link_choice, pattern="^link_choice_"))
+    application.add_handler(CallbackQueryHandler(handle_edit_link, pattern="^edit_"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Inicia o bot
