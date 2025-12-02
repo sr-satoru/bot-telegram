@@ -50,25 +50,7 @@ Comandos disponíveis:
 """
     await update.message.reply_text(welcome_message)
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para o comando /help"""
-    help_text = """
-📚 Ajuda - Bot de Templates
 
-Para salvar um template, envie uma mensagem como:
-"Olá {link = clique aqui} tudo certo {link = me responde}"
-
-O bot irá:
-1. Extrair todos os segmentos com {link = ...}
-2. Salvar o template removendo as variáveis
-3. Você precisará fornecer os URLs dos links na ordem
-
-Comandos:
-/listar - Ver todos os templates salvos
-/enviar <id> - Enviar um template (será solicitado o link)
-/deletar <id> - Deletar um template
-"""
-    await update.message.reply_text(help_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para mensagens de texto"""
@@ -177,39 +159,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "{link = palavra ou frase}\n\n"
                 "Exemplo: Olá {link = clique aqui} tudo certo {link = me responde}"
             )
-
-async def list_templates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para o comando /listar"""
-    templates = db.get_all_templates()
-    
-    if not templates:
-        await update.message.reply_text("📭 Nenhum template salvo ainda.")
-        return
-    
-    message = "📋 Templates salvos:\n\n"
-    for template in templates:
-        template_id = template['id']
-        template_msg = template['template_mensagem']
-        links = template['links']
-        created_at = template['created_at']
-        
-        message += f"ID: {template_id}\n"
-        message += f"Template: {template_msg}\n"
-        message += f"Links ({len(links)}):\n"
-        for i, (segmento, link_url) in enumerate(links, 1):
-            message += f"  {i}. '{segmento}' → {link_url}\n"
-        message += f"Criado em: {created_at}\n"
-        message += "─" * 30 + "\n\n"
-    
-    # Telegram tem limite de 4096 caracteres por mensagem
-    if len(message) > 4000:
-        # Divide em múltiplas mensagens se necessário
-        chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
-        for chunk in chunks:
-            await update.message.reply_text(chunk)
-    else:
-        await update.message.reply_text(message)
-
+            
 async def send_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /enviar"""
     if not context.args:
@@ -240,43 +190,9 @@ async def send_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             formatted_message,
             parse_mode='HTML'
-        )
-        
-        links_info = "\n".join([f"  • {seg} → {url}" for seg, url in links])
-        await update.message.reply_text(
-            f"✅ Mensagem enviada com {len(links)} link(s) formatado(s)!\n\n"
-            f"Links aplicados:\n{links_info}"
-        )
-        
-    except ValueError:
-        await update.message.reply_text("⚠️ ID deve ser um número.")
+        )   
     except Exception as e:
         logger.error(f"Erro ao enviar template: {e}")
-        await update.message.reply_text(f"❌ Erro ao enviar template: {str(e)}")
-
-async def delete_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para o comando /deletar"""
-    if not context.args:
-        await update.message.reply_text(
-            "⚠️ Use: /deletar <id>\n"
-            "Exemplo: /deletar 1"
-        )
-        return
-    
-    try:
-        template_id = int(context.args[0])
-        deleted = db.delete_template(template_id)
-        
-        if deleted:
-            await update.message.reply_text(f"✅ Template {template_id} deletado com sucesso!")
-        else:
-            await update.message.reply_text(f"❌ Template com ID {template_id} não encontrado.")
-            
-    except ValueError:
-        await update.message.reply_text("⚠️ ID deve ser um número.")
-    except Exception as e:
-        logger.error(f"Erro ao deletar template: {e}")
-        await update.message.reply_text(f"❌ Erro ao deletar template: {str(e)}")
 
 def main():
     """Função principal para iniciar o bot"""
@@ -285,10 +201,7 @@ def main():
     
     # Adiciona handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("listar", list_templates))
     application.add_handler(CommandHandler("enviar", send_template))
-    application.add_handler(CommandHandler("deletar", delete_template))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Inicia o bot

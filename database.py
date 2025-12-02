@@ -211,19 +211,5 @@ class Database:
         conn.close()
         return results
     
-    def delete_template(self, template_id: int) -> bool:
-        """
-        Deleta um template pelo ID
-        Os links são deletados automaticamente devido ao CASCADE
-        """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('DELETE FROM templates WHERE id = ?', (template_id,))
-        
-        deleted = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
-        
-        return deleted
+
 
