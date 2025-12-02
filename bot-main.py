@@ -64,7 +64,7 @@ def require_admin(func):
         user_id = update.effective_user.id
         
         if not is_admin(user_id):
-            message_text = "❌ Você não tem permissão para usar este bot."
+            message_text = "❌ Você não tem permissão para usar este bot. Fale com o @sr_satoru_Gojo para liberrar seu acesso "
             try:
                 if update.callback_query:
                     await update.callback_query.answer(message_text, show_alert=True)
@@ -147,7 +147,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for key in keys_to_remove:
         context.user_data.pop(key, None)
     
-    welcome_message = "🤖 <b>Bot de Vagas</b>\n\nEscolha uma opção:"
+    welcome_message = "🤖 <b>Bot de Postagens canais</b>\n\nEscolha uma opção:"
     
     # Cria botões inline
     keyboard = [
@@ -224,7 +224,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "voltar_start":
         # Volta para o menu inicial
         user_id = query.from_user.id
-        welcome_message = "🤖 <b>Bot de Vagas</b>\n\nEscolha uma opção:"
+        welcome_message = "🤖 <b>Bot de Postagens canais</b>\n\nEscolha uma opção:"
         
         keyboard = [
             [
@@ -550,6 +550,98 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Edição cancelada.",
             parse_mode='HTML'
         )
+    
+    elif query.data == "edit_deletar_canal":
+        # Confirmação para deletar canal
+        user_id = query.from_user.id
+        dados = context.user_data.get('editando', {})
+        
+        if not dados:
+            await query.answer("❌ Erro: dados não encontrados.", show_alert=True)
+            return
+        
+        canal_id = dados.get('canal_id')
+        nome_canal = dados.get('nome', 'Canal')
+        
+        # Verifica permissão
+        canal = db.get_canal(canal_id)
+        if not canal:
+            await query.answer("❌ Canal não encontrado.", show_alert=True)
+            return
+        
+        if not is_super_admin(user_id) and canal['user_id'] != user_id:
+            await query.answer("❌ Você não tem permissão para deletar este canal.", show_alert=True)
+            return
+        
+        # Mostra confirmação
+        mensagem = f"⚠️ <b>Confirmar Exclusão</b>\n\n"
+        mensagem += f"Tem certeza que deseja <b>DELETAR</b> o canal:\n\n"
+        mensagem += f"📢 <b>{nome_canal}</b>\n\n"
+        mensagem += f"<b>Esta ação não pode ser desfeita!</b>\n\n"
+        mensagem += f"❌ Serão deletados:\n"
+        mensagem += f"• Canal e configurações\n"
+        mensagem += f"• Todos os templates\n"
+        mensagem += f"• Todos os grupos de mídias\n"
+        mensagem += f"• Todas as configurações relacionadas\n"
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("❌ Confirmar Deletar", callback_data=f"confirmar_deletar_canal_{canal_id}"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Cancelar", callback_data="cancelar_deletar_canal"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("confirmar_deletar_canal_"):
+        # Confirma e deleta o canal
+        user_id = query.from_user.id
+        canal_id = int(query.data.split("_")[-1])
+        
+        # Verifica permissão novamente
+        canal = db.get_canal(canal_id)
+        if not canal:
+            await query.answer("❌ Canal não encontrado.", show_alert=True)
+            return
+        
+        if not is_super_admin(user_id) and canal['user_id'] != user_id:
+            await query.answer("❌ Você não tem permissão para deletar este canal.", show_alert=True)
+            return
+        
+        nome_canal = canal['nome']
+        
+        # Deleta o canal
+        deleted = db.delete_canal(canal_id)
+        
+        if deleted:
+            # Limpa contexto de edição
+            if 'editando' in context.user_data:
+                del context.user_data['editando']
+            
+            # Mensagem de sucesso com botão para voltar ao menu
+            keyboard = [
+                [
+                    InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_start"),
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"✅ <b>Canal deletado com sucesso!</b>\n\n"
+                f"📢 <b>{nome_canal}</b> foi permanentemente removido.\n\n"
+                f"Todos os dados relacionados foram excluídos.",
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
+        else:
+            await query.answer("❌ Erro ao deletar canal.", show_alert=True)
+    
+    elif query.data == "cancelar_deletar_canal":
+        # Cancela a deleção e volta para o menu de edição
+        await mostrar_menu_edicao(query, context)
     
     elif query.data == "link_choice_same":
         # Usar o mesmo link para todos
@@ -3069,6 +3161,9 @@ async def mostrar_menu_edicao(query, context):
         [
             InlineKeyboardButton("📸 Gerenciar Mídias", callback_data="edit_medias"),
         ],
+        [
+            InlineKeyboardButton("🗑️ Deletar Canal", callback_data="edit_deletar_canal"),
+        ],
     ]
     
     if dados.get('changes_made', False):
@@ -3516,7 +3611,7 @@ def main():
     
     # Inicia o bot com polling apenas
     # drop_pending_updates=True garante que ignora updates pendentes e deleta webhook se houver
-    logger.info("Bot de vagas iniciado! (Modo: Polling apenas)")
+    logger.info("Bot de Postagens canais iniciado! (Modo: Polling apenas)")
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True  # Deleta webhook e ignora updates pendentes
