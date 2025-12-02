@@ -2965,13 +2965,9 @@ async def mostrar_menu_medias(query, context):
         keyboard.append([
             InlineKeyboardButton("📋 Ver Grupos de Mídias", callback_data="listar_grupos_midias")
         ])
-        
-        # Verifica se há grupos sem template
-        grupos_sem_template = [g for g in media_groups if not g.get('template_id')]
-        if grupos_sem_template:
-            keyboard.append([
-                InlineKeyboardButton("⚡ Associar Template Automaticamente", callback_data="associar_template_automatico")
-            ])
+        keyboard.append([
+            InlineKeyboardButton("⚡ Associar Template Automaticamente", callback_data="associar_template_automatico")
+        ])
     
     keyboard.append([
         InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
@@ -3074,12 +3070,11 @@ async def enviar_preview_grupo_midia(query, context, group_id: int):
     if group.get('template_id'):
         template = db.get_template(group['template_id'])
     
-    # Busca botões globais do canal
+    # Busca botões globais do canal (sempre busca, mesmo sem template)
     global_buttons = None
     if group.get('canal_id'):
         global_buttons = db.get_global_buttons(group['canal_id'])
-        if not global_buttons:
-            global_buttons = None
+        # Se não encontrou botões, deixa como None (o media_handler tentará buscar novamente)
     
     # Envia mensagem de carregamento
     await query.answer("📤 Enviando preview...")

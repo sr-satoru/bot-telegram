@@ -153,7 +153,31 @@ class MediaHandler:
             
             # Se houver botões, edita a primeira mensagem para adicionar
             if reply_markup and sent_messages:
-                await sent_messages[0].edit_reply_markup(reply_markup=reply_markup)
+                try:
+                    # Se tem caption, edita caption e botões juntos
+                    if caption:
+                        await sent_messages[0].edit_caption(
+                            caption=caption,
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode
+                        )
+                        logger.info(f"Botões inline e caption adicionados ao media group {media_group.get('id')}")
+                    else:
+                        # Se não tem caption, tenta apenas adicionar botões
+                        await sent_messages[0].edit_reply_markup(reply_markup=reply_markup)
+                        logger.info(f"Botões inline adicionados ao media group {media_group.get('id')} (sem caption)")
+                except Exception as e:
+                    logger.error(f"Erro ao adicionar botões inline ao media group {media_group.get('id')}: {e}")
+                    # Tenta novamente com edit_caption mesmo sem caption
+                    try:
+                        await sent_messages[0].edit_caption(
+                            caption=caption if caption else "",
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode if caption else None
+                        )
+                        logger.info(f"Botões inline adicionados via edit_caption ao media group {media_group.get('id')}")
+                    except Exception as e2:
+                        logger.error(f"Erro ao editar caption com botões: {e2}")
             
             return True
             
@@ -285,9 +309,18 @@ class MediaHandler:
             if auto_template:
                 template = auto_template
         
+        # Se não tem global_buttons mas tem canal_id, busca botões globais automaticamente
+        if not global_buttons and database and media_group.get('canal_id'):
+            global_buttons = database.get_global_buttons(media_group['canal_id'])
+            if not global_buttons:
+                global_buttons = None
+        
         # Prepara caption do template
         caption = None
         reply_markup = None
+        
+        # Prepara botões (mesmo sem template, se houver botões globais)
+        all_buttons = []
         
         if template:
             # Formata mensagem do template com links
@@ -311,26 +344,26 @@ class MediaHandler:
             else:
                 caption = template_text
             
-            # Prepara botões inline
-            inline_buttons = template.get('inline_buttons', [])
-            all_buttons = []
-            
             # Adiciona botões do template
+            inline_buttons = template.get('inline_buttons', [])
             for button in inline_buttons:
                 all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
-            
-            # Adiciona botões globais se houver
-            if global_buttons:
-                for button in global_buttons:
-                    all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
-            
-            # Organiza botões em linhas de 2
-            if all_buttons:
-                button_rows = []
-                for i in range(0, len(all_buttons), 2):
-                    row = all_buttons[i:i+2]
-                    button_rows.append(row)
-                reply_markup = InlineKeyboardMarkup(button_rows)
+        
+        # Adiciona botões globais se houver (mesmo sem template)
+        if global_buttons:
+            for button in global_buttons:
+                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
+        
+        # Organiza botões em linhas de 2
+        if all_buttons:
+            button_rows = []
+            for i in range(0, len(all_buttons), 2):
+                row = all_buttons[i:i+2]
+                button_rows.append(row)
+            reply_markup = InlineKeyboardMarkup(button_rows)
+            logger.info(f"Preparando {len(all_buttons)} botões inline para media group {media_group.get('id')}")
+        else:
+            logger.info(f"Nenhum botão inline para media group {media_group.get('id')}")
         
         # Envia o media group
         return await self.send_media_group(
