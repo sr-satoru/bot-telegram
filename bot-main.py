@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.error import Conflict
 from database import Database
 from parser import MessageParser
 from media_handler import MediaHandler
@@ -3594,10 +3595,24 @@ async def post_init(application: Application) -> None:
     asyncio.create_task(scheduler.run_scheduler())
     logger.info("🚀 Scheduler de mídias iniciado!")
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Trata erros que ocorrem durante o processamento de updates"""
+    # Trata erros de conflito (múltiplas instâncias) de forma silenciosa
+    if isinstance(context.error, Conflict):
+        # Log apenas em nível DEBUG para não poluir os logs
+        logger.debug(f"Conflito de polling detectado (normal quando há múltiplas instâncias): {context.error}")
+        return
+    
+    # Para outros erros, loga normalmente
+    logger.error(f"Erro não tratado: {context.error}", exc_info=context.error)
+
 def main():
     """Função principal para iniciar o bot"""
     # Cria a aplicação
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    
+    # Adiciona error handler para tratar conflitos de forma silenciosa
+    application.add_error_handler(error_handler)
     
     # Adiciona handlers
     application.add_handler(CommandHandler("start", start))
