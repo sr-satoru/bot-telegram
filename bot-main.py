@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from database import Database
+from parser import MessageParser
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -23,8 +24,9 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN não encontrado no arquivo .env")
 
-# Inicializa banco de dados
+# Inicializa banco de dados e parser
 db = Database()
+parser = MessageParser()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /start"""
@@ -111,6 +113,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
     
+    elif query.data.startswith("criar_template_"):
+        # Inicia criação de template para um canal
+        canal_id = int(query.data.split("_")[-1])
+        context.user_data['criando_template'] = True
+        context.user_data['canal_id_template'] = canal_id
+        context.user_data['etapa'] = 'template_mensagem'
+        
+        await query.edit_message_text(
+            "📝 <b>Criar Template</b>\n\n"
+            "Envie a mensagem com variáveis de link:\n"
+            "Formato: <code>{link = texto}</code>\n\n"
+            "Exemplo:\n"
+            "<code>Olá {link = clique aqui} tudo certo {link = me responde}</code>",
+            parse_mode='HTML'
+        )
+    
     elif query.data.startswith("editar_canal_"):
         # Abre o menu de edição de um canal específico
         canal_id = int(query.data.split("_")[-1])
@@ -194,6 +212,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             "❌ Edição cancelada.",
+            parse_mode='HTML'
+        )
+    
+    elif query.data == "link_choice_same":
+        # Usar o mesmo link para todos
+        context.user_data['use_same_link'] = True
+        context.user_data['waiting_for_link_choice'] = False
+        context.user_data['etapa'] = 'recebendo_link'
+        
+        template_data = context.user_data['pending_template']
+        num_links = template_data['num_links']
+        
+        await query.edit_message_text(
+            f"✅ <b>Mesmo link para todos</b>\n\n"
+            f"Envie o URL do link:\n"
+            f"Exemplo: <code>https://example.com</code>",
+            parse_mode='HTML'
+        )
+    
+    elif query.data == "link_choice_separate":
+        # Usar links separados
+        context.user_data['use_same_link'] = False
+        context.user_data['waiting_for_link_choice'] = False
+        context.user_data['etapa'] = 'recebendo_link'
+        
+        template_data = context.user_data['pending_template']
+        segmentos = template_data['segmentos']
+        num_links = template_data['num_links']
+        
+        await query.edit_message_text(
+            f"✅ <b>Links separados</b>\n\n"
+            f"Envie o URL do primeiro link (1/{num_links}):\n"
+            f"Segmento: '{segmentos[0]}'\n"
+            f"Exemplo: <code>https://example.com</code>",
             parse_mode='HTML'
         )
     
@@ -508,7 +560,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_id=user_id
             )
             
-            mensagem = f"✅ <b>Configuração salva!</b>\n\n"
+            mensagem = f"✅ <b>Canal salvo!</b>\n\n"
             mensagem += f"📢 {nome_canal}\n"
             mensagem += f"🆔 IDs ({len(ids_canal)}):\n"
             for i, canal_id_telegram in enumerate(ids_canal, 1):
@@ -516,11 +568,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mensagem += f"\n🕒 Horários ({len(horarios)}):\n"
             for i, horario in enumerate(sorted(horarios), 1):
                 mensagem += f"{i}. {horario}\n"
-            mensagem += f"\n💾 ID do canal: {canal_id}"
+            mensagem += f"\n💾 ID: {canal_id}\n\n"
+            mensagem += "📝 <b>Criar template de mensagem?</b>"
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ Sim", callback_data=f"criar_template_{canal_id}"),
+                    InlineKeyboardButton("❌ Não", callback_data="voltar_start"),
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
             
         except Exception as e:
             logger.error(f"Erro ao salvar canal: {e}")
-            mensagem = f"❌ Erro ao salvar no banco de dados: {str(e)}"
+            mensagem = f"❌ Erro: {str(e)}"
+            reply_markup = None
         
         # Limpa o contexto
         del context.user_data['criando_canal']
@@ -529,12 +591,155 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del context.user_data['ids_canal']
         del context.user_data['horarios']
         
-        await query.edit_message_text(mensagem, parse_mode='HTML')
+        if reply_markup:
+            await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        else:
+            await query.edit_message_text(mensagem, parse_mode='HTML')
     
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para mensagens de texto"""
     message_text = update.message.text
+    
+    # Verifica se está criando um template
+    if context.user_data.get('criando_template', False):
+        etapa = context.user_data.get('etapa')
+        canal_id = context.user_data.get('canal_id_template')
+        
+        if etapa == 'template_mensagem':
+            # Parseia a mensagem para extrair variáveis de link
+            parsed = parser.parse_and_save_template(message_text)
+            
+            if not parsed:
+                await update.message.reply_text(
+                    "⚠️ Nenhuma variável de link encontrada.\n\n"
+                    "Use o formato: <code>{link = texto}</code>\n\n"
+                    "Exemplo: <code>Olá {link = clique aqui} tudo certo</code>",
+                    parse_mode='HTML'
+                )
+                return
+            
+            # Salva o template temporariamente
+            context.user_data['pending_template'] = parsed
+            context.user_data['original_message'] = message_text
+            context.user_data['links_received'] = []
+            context.user_data['current_link_index'] = 0
+            
+            num_links = parsed['num_links']
+            segmentos = parsed['segmentos']
+            
+            response = f"✅ <b>Template detectado!</b>\n\n"
+            response += f"📝 Template: {parsed['template_mensagem']}\n\n"
+            response += f"🔗 {num_links} link(s) encontrado(s):\n"
+            
+            for i, segmento in enumerate(segmentos, 1):
+                response += f"{i}. '{segmento}'\n"
+            
+            # Se houver múltiplos links, mostra botões para escolher
+            if num_links > 1:
+                response += f"\n📌 Como configurar os links?"
+                context.user_data['waiting_for_link_choice'] = True
+                
+                keyboard = [
+                    [InlineKeyboardButton("🔗 Mesmo link para todos", callback_data="link_choice_same")],
+                    [InlineKeyboardButton("🔗 Links separados", callback_data="link_choice_separate")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='HTML')
+            else:
+                # Se for apenas 1 link, vai direto pedir o URL
+                response += f"\nEnvie o URL do link:"
+                context.user_data['waiting_for_link_choice'] = False
+                await update.message.reply_text(response, parse_mode='HTML')
+            return
+        
+        elif etapa == 'recebendo_link':
+            # Processa o link recebido
+            link_url = message_text.strip()
+            
+            # Valida URL
+            if not (link_url.startswith('http://') or link_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    parse_mode='HTML'
+                )
+                return
+            
+            template_data = context.user_data['pending_template']
+            num_links = template_data['num_links']
+            segmentos = template_data['segmentos']
+            
+            # Verifica se está usando o mesmo link para todos
+            if context.user_data.get('use_same_link', False):
+                # Aplica o mesmo link para todos os segmentos
+                links_list = [(seg, link_url) for seg in segmentos]
+                
+                # Salva o template
+                template_id = db.save_template(
+                    canal_id=canal_id,
+                    template_mensagem=template_data['template_mensagem'],
+                    links=links_list
+                )
+                
+                await update.message.reply_text(
+                    f"✅ <b>Template salvo!</b>\n\n"
+                    f"📝 ID: {template_id}\n"
+                    f"🔗 Links: {num_links} (mesmo URL)\n"
+                    f"🌐 URL: {link_url[:50]}...",
+                    parse_mode='HTML'
+                )
+                
+                # Limpa o contexto
+                for key in ['criando_template', 'canal_id_template', 'etapa', 'pending_template',
+                           'original_message', 'links_received', 'current_link_index',
+                           'use_same_link', 'waiting_for_link_choice']:
+                    context.user_data.pop(key, None)
+                return
+            
+            # Modo separado: adiciona o link à lista
+            current_index = context.user_data['current_link_index']
+            
+            if current_index >= len(segmentos):
+                await update.message.reply_text("⚠️ Erro: índice inválido.")
+                return
+            
+            context.user_data['links_received'].append((segmentos[current_index], link_url))
+            context.user_data['current_link_index'] += 1
+            
+            links_received = len(context.user_data['links_received'])
+            
+            # Verifica se ainda faltam links
+            if links_received < num_links:
+                # Pede o próximo link
+                next_index = context.user_data['current_link_index']
+                if next_index < len(segmentos):
+                    next_segmento = segmentos[next_index]
+                    await update.message.reply_text(
+                        f"✅ Link {links_received}/{num_links} recebido!\n\n"
+                        f"Envie o URL para '{next_segmento}' ({links_received + 1}/{num_links}):",
+                        parse_mode='HTML'
+                    )
+            else:
+                # Todos os links foram recebidos, salva o template
+                template_id = db.save_template(
+                    canal_id=canal_id,
+                    template_mensagem=template_data['template_mensagem'],
+                    links=context.user_data['links_received']
+                )
+                
+                await update.message.reply_text(
+                    f"✅ <b>Template salvo!</b>\n\n"
+                    f"📝 ID: {template_id}\n"
+                    f"🔗 Links: {num_links}",
+                    parse_mode='HTML'
+                )
+                
+                # Limpa o contexto
+                for key in ['criando_template', 'canal_id_template', 'etapa', 'pending_template',
+                           'original_message', 'links_received', 'current_link_index',
+                           'use_same_link', 'waiting_for_link_choice']:
+                    context.user_data.pop(key, None)
+            return
     
     # Verifica se está editando um canal
     if 'editando' in context.user_data:
