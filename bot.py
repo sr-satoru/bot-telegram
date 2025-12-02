@@ -104,6 +104,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['waiting_for_link_choice'] = False
             await update.message.reply_text(response)
     else:
+        # Verifica se está editando todos os links
+        if context.user_data.get('editing_all_links', False):
+            link_url = message_text.strip()
+            
+            # Valida se parece ser uma URL
+            if not (link_url.startswith('http://') or link_url.startswith('https://')):
+                await update.message.reply_text(
+                    "⚠️ Por favor, envie uma URL válida começando com http:// ou https://"
+                )
+                return
+            
+            template_id = context.user_data['editing_template_id']
+            num_links = context.user_data['editing_num_links']
+            
+            # Atualiza todos os links
+            updated_count = db.update_all_links(template_id, link_url)
+            
+            if updated_count > 0:
+                # Limpa o contexto de edição
+                del context.user_data['editing_all_links']
+                del context.user_data['editing_template_id']
+                del context.user_data['editing_num_links']
+                
+                # Retorna ao painel de edição com mensagem de sucesso
+                url_display = link_url if len(link_url) <= 50 else link_url[:47] + "..."
+                success_msg = f"Todos os {updated_count} segmentos atualizados para: {url_display}"
+                await show_edit_panel(update, template_id, success_msg)
+            else:
+                await update.message.reply_text(
+                    "❌ Erro ao atualizar os links. Por favor, tente novamente."
+                )
+            return
+        
         # Verifica se está editando um link
         if 'editing_link_id' in context.user_data:
             link_url = message_text.strip()
@@ -334,6 +367,12 @@ async def show_edit_panel(update_or_query, template_id: int, success_message: st
             )
         ])
     
+    # Botão para editar todos os links de uma vez
+    if len(links) > 1:
+        keyboard.append([
+            InlineKeyboardButton("🔗 Editar todos para o mesmo link", callback_data=f"edit_all_{template_id}")
+        ])
+    
     # Botão para cancelar
     keyboard.append([
         InlineKeyboardButton("❌ Cancelar", callback_data="edit_cancel")
@@ -380,6 +419,32 @@ async def handle_edit_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == "edit_cancel":
         await query.edit_message_text("❌ Edição cancelada.")
+        return
+    
+    if query.data.startswith("edit_all_"):
+        template_id = int(query.data.split("_")[-1])
+        
+        # Busca informações do template
+        template = db.get_template_with_link_ids(template_id)
+        
+        if not template:
+            await query.edit_message_text("❌ Template não encontrado.")
+            return
+        
+        num_links = len(template['links'])
+        
+        # Salva o contexto para edição de todos
+        context.user_data['editing_all_links'] = True
+        context.user_data['editing_template_id'] = template_id
+        context.user_data['editing_num_links'] = num_links
+        
+        await query.edit_message_text(
+            f"🔗 Editando todos os links\n\n"
+            f"📝 Template ID: {template_id}\n"
+            f"🔗 Total de segmentos: {num_links}\n\n"
+            f"Envie o URL que será aplicado a TODOS os segmentos:\n"
+            f"Exemplo: https://example.com"
+        )
         return
     
     if query.data.startswith("edit_link_"):

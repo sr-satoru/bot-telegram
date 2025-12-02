@@ -289,5 +289,25 @@ class Database:
         conn.close()
         
         return result
+    
+    def update_all_links(self, template_id: int, new_url: str) -> int:
+        """
+        Atualiza todos os links de um template para o mesmo URL
+        Retorna o número de links atualizados
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE template_links
+            SET link_da_mensagem = ?
+            WHERE template_id = ?
+        ''', (new_url, template_id))
+        
+        updated_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return updated_count
 
 
