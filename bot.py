@@ -1,8 +1,8 @@
 import os
 import logging
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from database import Database
 from parser import MessageParser
 
@@ -80,58 +80,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for i, segmento in enumerate(segmentos, 1):
             response += f"🔗 Link {i}: segmento '{segmento}'\n"
         
-        # Se houver múltiplos links, pergunta se quer usar o mesmo link ou separados
+        # Se houver múltiplos links, mostra botões inline para escolher
         if num_links > 1:
-            response += f"\n📌 Como deseja configurar os links?\n"
-            response += f"1️⃣ Digite '1' ou 'mesmo' para usar o mesmo link em todos os segmentos\n"
-            response += f"2️⃣ Digite '2' ou 'separado' para usar links diferentes em cada segmento"
+            response += f"\n📌 Como deseja configurar os links?"
             context.user_data['waiting_for_link_choice'] = True
+            
+            # Cria botões inline
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔗 Mesmo link para todos", callback_data="link_choice_same"),
+                ],
+                [
+                    InlineKeyboardButton("🔗 Links separados", callback_data="link_choice_separate"),
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(response, reply_markup=reply_markup)
         else:
             # Se for apenas 1 link, vai direto pedir o URL
             response += f"\nEnvie o URL do link:\n"
             response += "Exemplo: https://example.com"
             context.user_data['waiting_for_link_choice'] = False
-        
-        await update.message.reply_text(response)
+            await update.message.reply_text(response)
     else:
         # Verifica se há um template pendente esperando pelos links
         if 'pending_template' in context.user_data:
             template_data = context.user_data['pending_template']
             num_links = template_data['num_links']
-            
-            # Verifica se está esperando a escolha do tipo de link (mesmo ou separado)
-            if context.user_data.get('waiting_for_link_choice', False):
-                choice = message_text.strip().lower()
-                
-                if choice in ['1', 'mesmo', 'igual', 'todos']:
-                    # Usar o mesmo link para todos
-                    context.user_data['use_same_link'] = True
-                    context.user_data['waiting_for_link_choice'] = False
-                    await update.message.reply_text(
-                        f"✅ Você escolheu usar o mesmo link para todos os {num_links} segmentos.\n\n"
-                        f"Envie o URL do link:\n"
-                        f"Exemplo: https://example.com"
-                    )
-                    return
-                elif choice in ['2', 'separado', 'diferente', 'cada']:
-                    # Usar links separados
-                    context.user_data['use_same_link'] = False
-                    context.user_data['waiting_for_link_choice'] = False
-                    segmentos = template_data['segmentos']
-                    await update.message.reply_text(
-                        f"✅ Você escolheu usar links separados.\n\n"
-                        f"Envie o URL do primeiro link (1/{num_links}):\n"
-                        f"Segmento: '{segmentos[0]}'\n"
-                        f"Exemplo: https://example.com"
-                    )
-                    return
-                else:
-                    await update.message.reply_text(
-                        "⚠️ Opção inválida. Por favor, digite:\n"
-                        "• '1' ou 'mesmo' para usar o mesmo link\n"
-                        "• '2' ou 'separado' para usar links diferentes"
-                    )
-                    return
             
             # Assume que esta mensagem é um link URL
             link_url = message_text.strip()
@@ -243,6 +219,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Exemplo: Olá {link = clique aqui} tudo certo {link = me responde}"
             )
             
+async def handle_link_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler para processar a escolha de tipo de link via botões inline"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Verifica se há um template pendente
+    if 'pending_template' not in context.user_data:
+        await query.edit_message_text("⚠️ Template não encontrado. Por favor, envie um novo template.")
+        return
+    
+    template_data = context.user_data['pending_template']
+    num_links = template_data['num_links']
+    segmentos = template_data['segmentos']
+    
+    if query.data == "link_choice_same":
+        # Usar o mesmo link para todos
+        context.user_data['use_same_link'] = True
+        context.user_data['waiting_for_link_choice'] = False
+        
+        await query.edit_message_text(
+            f"✅ Você escolheu usar o mesmo link para todos os {num_links} segmentos.\n\n"
+            f"Envie o URL do link:\n"
+            f"Exemplo: https://example.com"
+        )
+    elif query.data == "link_choice_separate":
+        # Usar links separados
+        context.user_data['use_same_link'] = False
+        context.user_data['waiting_for_link_choice'] = False
+        
+        await query.edit_message_text(
+            f"✅ Você escolheu usar links separados.\n\n"
+            f"Envie o URL do primeiro link (1/{num_links}):\n"
+            f"Segmento: '{segmentos[0]}'\n"
+            f"Exemplo: https://example.com"
+        )
+
 async def send_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /enviar"""
     if not context.args:
@@ -285,6 +297,7 @@ def main():
     # Adiciona handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("enviar", send_template))
+    application.add_handler(CallbackQueryHandler(handle_link_choice, pattern="^link_choice_"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Inicia o bot
