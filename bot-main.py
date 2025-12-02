@@ -262,6 +262,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if not templates:
             keyboard = [
+                [InlineKeyboardButton("➕ Adicionar Template", callback_data=f"adicionar_template_{canal_id}")],
                 [InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -279,11 +280,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for template in templates:
             template_id = template['id']
             template_msg = template['template_mensagem']
-            preview = template_msg[:30] + "..." if len(template_msg) > 30 else template_msg
+            preview = template_msg[:25] + "..." if len(template_msg) > 25 else template_msg
             keyboard.append([
                 InlineKeyboardButton(f"📄 {preview}", callback_data=f"edit_template_{template_id}"),
                 InlineKeyboardButton("👁️ Preview", callback_data=f"preview_template_{template_id}")
             ])
+            keyboard.append([
+                InlineKeyboardButton("🗑️ Deletar", callback_data=f"deletar_template_{template_id}")
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("➕ Adicionar Template", callback_data=f"adicionar_template_{canal_id}")
+        ])
         
         keyboard.append([
             InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
@@ -325,6 +333,95 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(preview_text, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("adicionar_template_"):
+        # Inicia criação de novo template para o canal
+        canal_id = int(query.data.split("_")[-1])
+        context.user_data['criando_template'] = True
+        context.user_data['canal_id_template'] = canal_id
+        context.user_data['etapa'] = 'template_mensagem'
+        
+        await query.edit_message_text(
+            "📝 <b>Adicionar Template</b>\n\n"
+            "Envie a mensagem com variáveis de link:\n"
+            "Formato: <code>{link = texto}</code>\n\n"
+            "Exemplo:\n"
+            "<code>Olá {link = clique aqui} tudo certo {link = me responde}</code>",
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("deletar_template_"):
+        # Confirmação para deletar template
+        template_id = int(query.data.split("_")[-1])
+        template = db.get_template(template_id)
+        
+        if not template:
+            await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
+            return
+        
+        template_msg = template['template_mensagem']
+        preview = template_msg[:40] + "..." if len(template_msg) > 40 else template_msg
+        
+        mensagem = f"🗑️ <b>Deletar Template?</b>\n\n"
+        mensagem += f"📝 ID: {template_id}\n"
+        mensagem += f"📄 {preview}\n\n"
+        mensagem += "⚠️ Esta ação não pode ser desfeita!"
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Confirmar", callback_data=f"confirmar_deletar_template_{template_id}"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="edit_templates")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("confirmar_deletar_template_"):
+        # Deleta o template
+        template_id = int(query.data.split("_")[-1])
+        
+        deleted = db.delete_template(template_id)
+        
+        if deleted:
+            # Volta para a lista de templates
+            dados = context.user_data.get('editando', {})
+            canal_id = dados.get('canal_id')
+            
+            if canal_id:
+                templates = db.get_templates_by_canal(canal_id)
+                
+                mensagem = f"✅ <b>Template deletado!</b>\n\n"
+                mensagem += f"📝 <b>Gerenciar Templates</b>\n\n"
+                mensagem += f"Total: {len(templates)} template(s)\n\n"
+                
+                keyboard = []
+                for template in templates:
+                    template_id_item = template['id']
+                    template_msg = template['template_mensagem']
+                    preview = template_msg[:25] + "..." if len(template_msg) > 25 else template_msg
+                    keyboard.append([
+                        InlineKeyboardButton(f"📄 {preview}", callback_data=f"edit_template_{template_id_item}"),
+                        InlineKeyboardButton("👁️ Preview", callback_data=f"preview_template_{template_id_item}")
+                    ])
+                    keyboard.append([
+                        InlineKeyboardButton("🗑️ Deletar", callback_data=f"deletar_template_{template_id_item}")
+                    ])
+                
+                keyboard.append([
+                    InlineKeyboardButton("➕ Adicionar Template", callback_data=f"adicionar_template_{canal_id}")
+                ])
+                
+                keyboard.append([
+                    InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+                ])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+            else:
+                await query.edit_message_text("✅ Template deletado!", parse_mode='HTML')
+        else:
+            await query.edit_message_text("❌ Erro ao deletar template.", parse_mode='HTML')
     
     elif query.data.startswith("edit_template_"):
         # Mostra painel de edição de links do template
