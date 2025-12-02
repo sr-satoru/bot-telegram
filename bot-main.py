@@ -8,6 +8,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from database import Database
 from parser import MessageParser
 from media_handler import MediaHandler
+from scheduler import MediaScheduler
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -3146,10 +3147,27 @@ async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
+# Variável global para o scheduler
+scheduler = None
+
+async def post_init(application: Application) -> None:
+    """Inicializa o scheduler após o bot estar pronto"""
+    global scheduler
+    
+    # Aguarda um pouco para garantir que o bot está totalmente inicializado
+    import asyncio
+    await asyncio.sleep(2)
+    
+    scheduler = MediaScheduler(db, media_handler, application.bot)
+    
+    # Inicia o scheduler em background
+    asyncio.create_task(scheduler.run_scheduler())
+    logger.info("🚀 Scheduler de mídias iniciado!")
+
 def main():
     """Função principal para iniciar o bot"""
     # Cria a aplicação
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
     # Adiciona handlers
     application.add_handler(CommandHandler("start", start))
@@ -3161,9 +3179,13 @@ def main():
     # O usuário deve enviar fotos/vídeos diretamente (não como arquivo)
     application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
     
-    # Inicia o bot
-    logger.info("Bot de vagas iniciado!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Inicia o bot com polling apenas
+    # drop_pending_updates=True garante que ignora updates pendentes e deleta webhook se houver
+    logger.info("Bot de vagas iniciado! (Modo: Polling apenas)")
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True  # Deleta webhook e ignora updates pendentes
+    )
 
 if __name__ == '__main__':
     main()

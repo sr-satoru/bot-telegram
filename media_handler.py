@@ -103,15 +103,26 @@ class MediaHandler:
         
         return media_id
     
-    async def send_media_group(self, context: ContextTypes.DEFAULT_TYPE,
-                               chat_id: str, media_group: Dict,
+    async def send_media_group(self, context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+                               chat_id: str = None, media_group: Dict = None,
                                caption: Optional[str] = None,
                                parse_mode: str = 'HTML',
-                               reply_markup: Optional[InlineKeyboardMarkup] = None) -> bool:
+                               reply_markup: Optional[InlineKeyboardMarkup] = None,
+                               bot = None) -> bool:
         """
         Envia um grupo de mídias para um chat
+        Pode usar context.bot ou bot diretamente
         """
         try:
+            # Determina qual bot usar
+            if bot:
+                bot_instance = bot
+            elif context:
+                bot_instance = context.bot
+            else:
+                logger.error("Erro: precisa fornecer context ou bot")
+                return False
+            
             medias = media_group.get('medias', [])
             
             if not medias:
@@ -146,7 +157,7 @@ class MediaHandler:
                     )
             
             # Envia o media group
-            sent_messages = await context.bot.send_media_group(
+            sent_messages = await bot_instance.send_media_group(
                 chat_id=chat_id,
                 media=input_medias
             )
@@ -293,12 +304,13 @@ class MediaHandler:
         
         return None
     
-    async def send_media_group_with_template(self, context: ContextTypes.DEFAULT_TYPE,
-                                            chat_id: str, media_group: Dict,
+    async def send_media_group_with_template(self, context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+                                            chat_id: str = None, media_group: Dict = None,
                                             template: Optional[Dict] = None,
                                             global_buttons: Optional[List[Dict]] = None,
                                             database: Optional[Database] = None,
-                                            use_auto_template: bool = True) -> bool:
+                                            use_auto_template: bool = True,
+                                            bot = None) -> bool:
         """
         Envia um grupo de mídias com template e botões aplicados
         use_auto_template: Se True e não houver template, busca automaticamente do canal
@@ -371,6 +383,7 @@ class MediaHandler:
             chat_id=chat_id,
             media_group=media_group,
             caption=caption,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            bot=bot
         )
 

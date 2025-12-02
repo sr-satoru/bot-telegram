@@ -1,6 +1,9 @@
 import sqlite3
 import os
+import logging
 from typing import Optional, List, Tuple, Dict
+
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self, db_path: str = "bot_vagas.db"):
@@ -135,6 +138,17 @@ class Database:
                 caption TEXT,
                 FOREIGN KEY (media_group_id) REFERENCES media_groups(id) ON DELETE CASCADE,
                 FOREIGN KEY (media_id) REFERENCES medias(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Tabela de ciclo de envio de mídias (fila rotativa)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS media_cycle (
+                canal_id INTEGER NOT NULL,
+                cycle_order TEXT NOT NULL,
+                cycle_date TEXT NOT NULL,
+                PRIMARY KEY (canal_id, cycle_date),
+                FOREIGN KEY (canal_id) REFERENCES canais(id) ON DELETE CASCADE
             )
         ''')
         
@@ -1040,4 +1054,138 @@ class Database:
         conn.close()
         
         return True
+    
+    # ========== MÉTODOS DE CICLO DE MÍDIAS (FILA ROTATIVA) ==========
+    
+    def get_media_cycle(self, canal_id: int, media_groups: List[Dict]) -> List[int]:
+        """
+        Obtém ou cria o ciclo de mídias para um canal
+        Retorna lista de IDs de grupos de mídias em ordem
+        """
+        import json
+        import random
+        from datetime import datetime
+        
+        hoje = datetime.now().strftime('%Y-%m-%d')
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Busca ciclo existente
+        cursor.execute('''
+            SELECT cycle_order FROM media_cycle
+            WHERE canal_id = ? AND cycle_date = ?
+        ''', (canal_id, hoje))
+        
+        row = cursor.fetchone()
+        
+        if row:
+            order = json.loads(row[0])
+            # Filtra apenas grupos que ainda existem
+            group_ids = [g['id'] for g in media_groups]
+            order = [gid for gid in order if gid in group_ids]
+            
+            # Se o ciclo está vazio ou muito pequeno, recria
+            if len(order) < len(media_groups) * 0.1:  # Menos de 10% restantes
+                logger.info(f"🔄 Ciclo quase vazio para canal {canal_id}, recriando...")
+                ids = [g['id'] for g in media_groups]
+                random.shuffle(ids)
+                cursor.execute('''
+                    UPDATE media_cycle SET cycle_order = ?
+                    WHERE canal_id = ? AND cycle_date = ?
+                ''', (json.dumps(ids), canal_id, hoje))
+                conn.commit()
+                conn.close()
+                return ids
+            conn.close()
+            return order
+        else:
+            # Primeiro ciclo do dia - cria embaralhado
+            ids = [g['id'] for g in media_groups]
+            random.shuffle(ids)
+            cursor.execute('''
+                INSERT OR REPLACE INTO media_cycle (canal_id, cycle_order, cycle_date)
+                VALUES (?, ?, ?)
+            ''', (canal_id, json.dumps(ids), hoje))
+            conn.commit()
+            conn.close()
+            logger.info(f"🆕 Novo ciclo criado para canal {canal_id} com {len(ids)} grupos")
+            return ids
+    
+    def pop_media_cycle(self, canal_id: int, media_groups: List[Dict]) -> Optional[int]:
+        """
+        Remove e retorna o primeiro grupo da fila (sistema FIFO)
+        Quando a fila acaba, recria automaticamente embaralhando
+        Retorna o ID do grupo ou None se não houver grupos
+        """
+        import json
+        import random
+        from datetime import datetime
+        
+        hoje = datetime.now().strftime('%Y-%m-%d')
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Busca ciclo atual
+        cursor.execute('''
+            SELECT cycle_order FROM media_cycle
+            WHERE canal_id = ? AND cycle_date = ?
+        ''', (canal_id, hoje))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            # Cria novo ciclo
+            cycle = self.get_media_cycle(canal_id, media_groups)
+            if not cycle:
+                conn.close()
+                return None
+            # Recursivamente chama novamente após criar
+            return self.pop_media_cycle(canal_id, media_groups)
+        
+        order = json.loads(row[0])
+        
+        if not order:
+            # Ciclo vazio - recria
+            if media_groups and len(media_groups) > 0:
+                logger.info(f"🔄 Recriando ciclo com {len(media_groups)} grupos disponíveis...")
+                ids = [g['id'] for g in media_groups]
+                random.shuffle(ids)
+                cursor.execute('''
+                    UPDATE media_cycle SET cycle_order = ?
+                    WHERE canal_id = ? AND cycle_date = ?
+                ''', (json.dumps(ids), canal_id, hoje))
+                conn.commit()
+                
+                # Retorna a primeira do novo ciclo
+                if ids:
+                    next_id = ids[0]
+                    remaining_ids = ids[1:]
+                    cursor.execute('''
+                        UPDATE media_cycle SET cycle_order = ?
+                        WHERE canal_id = ? AND cycle_date = ?
+                    ''', (json.dumps(remaining_ids), canal_id, hoje))
+                    conn.commit()
+                    conn.close()
+                    logger.info(f"✅ Novo ciclo criado e primeiro grupo {next_id} selecionado")
+                    return next_id
+            conn.close()
+            return None
+        
+        # Pega o primeiro da fila (FIFO)
+        next_id = order.pop(0)
+        
+        # Atualiza a fila removendo o primeiro
+        cursor.execute('''
+            UPDATE media_cycle SET cycle_order = ?
+            WHERE canal_id = ? AND cycle_date = ?
+        ''', (json.dumps(order), canal_id, hoje))
+        conn.commit()
+        conn.close()
+        
+        # Log de progresso
+        total_restante = len(order)
+        if total_restante <= 3:
+            logger.info(f"⚠️ Poucos grupos restantes no ciclo: {total_restante}")
+        
+        return next_id
 
