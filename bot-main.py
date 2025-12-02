@@ -268,11 +268,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['global_button_canal_id'] = canal_id
         context.user_data['global_button_etapa'] = 'texto'
         
+        keyboard = [
+            [
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             "➕ <b>Adicionar Botão Global</b>\n\n"
             "Este botão será aplicado a TODOS os templates do canal.\n\n"
             "Envie o texto do botão:\n"
             "Ex: <code>Clique aqui</code>",
+            reply_markup=reply_markup,
             parse_mode='HTML'
         )
     
@@ -299,11 +308,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['global_button_etapa'] = 'texto'
         
         url_display = button_url if len(button_url) <= 50 else button_url[:47] + "..."
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             f"✏️ <b>Editar Botão Global</b>\n\n"
             f"📝 Texto atual: '{button_text}'\n"
             f"🔗 URL atual: {url_display}\n\n"
             f"Envie o novo texto do botão:",
+            reply_markup=reply_markup,
             parse_mode='HTML'
         )
     
@@ -666,6 +685,63 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "edit_cancel":
         # Cancela edição de links
         await query.edit_message_text("❌ Edição cancelada.", parse_mode='HTML')
+        return
+    
+    elif query.data == "cancelar_global_button":
+        # Cancela adição/edição de botão global
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        
+        # Limpa contexto de botão global
+        for key in ['adicionando_global_button', 'global_button_canal_id', 
+                   'global_button_etapa', 'global_button_text',
+                   'editando_global_button', 'global_button_id', 
+                   'global_button_new_text']:
+            context.user_data.pop(key, None)
+        
+        if canal_id:
+            # Volta para o menu de botões globais
+            global_buttons = db.get_global_buttons(canal_id)
+            
+            mensagem = "❌ <b>Operação cancelada</b>\n\n"
+            mensagem += "🔘 <b>Botões Globais</b>\n\n"
+            mensagem += "Botões globais são aplicados a TODOS os templates do canal.\n\n"
+            
+            if global_buttons:
+                mensagem += f"<b>Botões configurados ({len(global_buttons)}):</b>\n"
+                for i, button in enumerate(global_buttons, 1):
+                    url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
+                    mensagem += f"{i}. '{button['text']}'\n   → {url_display}\n\n"
+            else:
+                mensagem += "❌ Nenhum botão global configurado\n\n"
+            
+            keyboard = []
+            
+            for button in global_buttons:
+                button_display = button['text'][:25] + "..." if len(button['text']) > 25 else button['text']
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"✏️ {button_display}",
+                        callback_data=f"edit_global_button_{button['id']}"
+                    ),
+                    InlineKeyboardButton(
+                        f"🗑️",
+                        callback_data=f"deletar_global_button_{button['id']}"
+                    )
+                ])
+            
+            keyboard.append([
+                InlineKeyboardButton("➕ Adicionar Botão Global", callback_data=f"adicionar_global_button_{canal_id}")
+            ])
+            
+            keyboard.append([
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        else:
+            await query.edit_message_text("❌ Operação cancelada.", parse_mode='HTML')
         return
     
     elif query.data.startswith("edit_all_"):
@@ -1710,16 +1786,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             button_text = message_text.strip()
             
             if not button_text:
-                await update.message.reply_text("⚠️ Texto do botão não pode estar vazio.", parse_mode='HTML')
+                keyboard = [
+                    [
+                        InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(
+                    "⚠️ Texto do botão não pode estar vazio.",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
                 return
             
             context.user_data['global_button_text'] = button_text
             context.user_data['global_button_etapa'] = 'url'
             
+            keyboard = [
+                [
+                    InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                    InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await update.message.reply_text(
                 f"✅ Texto: <b>{button_text}</b>\n\n"
                 f"Envie o URL do botão:\n"
                 f"Ex: <code>https://example.com</code>",
+                reply_markup=reply_markup,
                 parse_mode='HTML'
             )
             return
@@ -1729,8 +1825,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             button_url = message_text.strip()
             
             if not (button_url.startswith('http://') or button_url.startswith('https://')):
+                keyboard = [
+                    [
+                        InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 await update.message.reply_text(
                     "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    reply_markup=reply_markup,
                     parse_mode='HTML'
                 )
                 return
@@ -1805,16 +1909,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_text = message_text.strip()
             
             if not new_text:
-                await update.message.reply_text("⚠️ Texto não pode estar vazio.", parse_mode='HTML')
+                keyboard = [
+                    [
+                        InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(
+                    "⚠️ Texto não pode estar vazio.",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
                 return
             
             context.user_data['global_button_new_text'] = new_text
             context.user_data['global_button_etapa'] = 'url'
             
+            keyboard = [
+                [
+                    InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                    InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await update.message.reply_text(
                 f"✅ Novo texto: <b>{new_text}</b>\n\n"
                 f"Envie o novo URL:\n"
                 f"Ex: <code>https://example.com</code>",
+                reply_markup=reply_markup,
                 parse_mode='HTML'
             )
             return
@@ -1824,8 +1948,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_url = message_text.strip()
             
             if not (new_url.startswith('http://') or new_url.startswith('https://')):
+                keyboard = [
+                    [
+                        InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_global_button"),
+                        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_global_buttons")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 await update.message.reply_text(
                     "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                    reply_markup=reply_markup,
                     parse_mode='HTML'
                 )
                 return
