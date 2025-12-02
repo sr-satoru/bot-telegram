@@ -47,6 +47,37 @@ def is_super_admin(user_id: int) -> bool:
     """Verifica se o usuário é o super admin"""
     return user_id == SUPER_ADMIN_ID
 
+def is_admin(user_id: int) -> bool:
+    """Verifica se o usuário é admin (super admin ou admin normal)"""
+    if is_super_admin(user_id):
+        return True
+    return db.is_admin(user_id)
+
+def is_admin_only(user_id: int) -> bool:
+    """Verifica se o usuário é apenas admin (não super admin)"""
+    return db.is_admin(user_id) and not is_super_admin(user_id)
+
+def require_admin(func):
+    """Decorador que verifica se o usuário é admin ou super admin antes de executar a função"""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user_id = update.effective_user.id
+        
+        if not is_admin(user_id):
+            message_text = "❌ Você não tem permissão para usar este bot."
+            try:
+                if update.callback_query:
+                    await update.callback_query.answer(message_text, show_alert=True)
+                elif update.message:
+                    await update.message.reply_text(message_text)
+            except Exception as e:
+                logger.error(f"Erro ao enviar mensagem de permissão: {e}")
+            return
+        
+        return await func(update, context, *args, **kwargs)
+    
+    return wrapper
+
 def require_super_admin(func):
     """Decorador que verifica se o usuário é super admin antes de executar a função"""
     @wraps(func)
@@ -68,9 +99,11 @@ def require_super_admin(func):
     
     return wrapper
 
-@require_super_admin
+@require_admin
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /start"""
+    user_id = update.effective_user.id
+    
     # Cancela qualquer fluxo de cadastro em andamento
     keys_to_remove = [
         'criando_canal',
@@ -106,7 +139,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'editing_link_id',
         'editing_segmento',
         'editing_ordem',
-        'editando'
+        'editando',
+        'adicionando_admin',
+        'admin_user_id'
     ]
     
     for key in keys_to_remove:
@@ -123,6 +158,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("✏️ Editar Canal", callback_data="editar_canal"),
         ]
     ]
+    
+    # Super admin vê opção de gerenciar admins
+    if is_super_admin(user_id):
+        keyboard.append([
+            InlineKeyboardButton("👥 Gerenciar Admins", callback_data="gerenciar_admins")
+        ])
+        keyboard.append([
+            InlineKeyboardButton("📊 Painel de Controle", callback_data="painel_controle")
+        ])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
@@ -131,7 +176,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-@require_super_admin
+@require_admin
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para processar callbacks dos botões inline"""
     query = update.callback_query
@@ -178,6 +223,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif query.data == "voltar_start":
         # Volta para o menu inicial
+        user_id = query.from_user.id
         welcome_message = "🤖 <b>Bot de Vagas</b>\n\nEscolha uma opção:"
         
         keyboard = [
@@ -188,6 +234,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("✏️ Editar Canal", callback_data="editar_canal"),
             ]
         ]
+        
+        # Super admin vê opção de gerenciar admins
+        if is_super_admin(user_id):
+            keyboard.append([
+                InlineKeyboardButton("👥 Gerenciar Admins", callback_data="gerenciar_admins")
+            ])
+            keyboard.append([
+                InlineKeyboardButton("📊 Painel de Controle", callback_data="painel_controle")
+            ])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
@@ -198,7 +254,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif query.data.startswith("criar_template_"):
         # Inicia criação de template para um canal
+        user_id = query.from_user.id
         canal_id = int(query.data.split("_")[-1])
+        
+        # Verifica se o canal pertence ao admin (isolamento)
+        canal = db.get_canal(canal_id)
+        if not canal:
+            await query.answer("❌ Canal não encontrado.", show_alert=True)
+            return
+        
+        if not is_super_admin(user_id) and canal['user_id'] != user_id:
+            await query.answer("❌ Você não tem permissão para criar templates neste canal.", show_alert=True)
+            return
+        
         context.user_data['criando_template'] = True
         context.user_data['canal_id_template'] = canal_id
         context.user_data['etapa'] = 'template_mensagem'
@@ -219,9 +287,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         canal = db.get_canal(canal_id)
         
-        if not canal or canal['user_id'] != user_id:
+        if not canal:
             await query.edit_message_text(
-                "❌ Canal não encontrado ou você não tem permissão para editá-lo.",
+                "❌ Canal não encontrado.",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Verifica permissão: super admin pode editar qualquer canal, admin normal só os seus
+        if not is_super_admin(user_id) and canal['user_id'] != user_id:
+            await query.edit_message_text(
+                "❌ Você não tem permissão para editar este canal.",
                 parse_mode='HTML'
             )
             return
@@ -1566,8 +1642,177 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text(mensagem, parse_mode='HTML')
     
+    elif query.data == "gerenciar_admins":
+        # Apenas super admin pode acessar
+        if not is_super_admin(query.from_user.id):
+            await query.answer("❌ Apenas o super admin pode gerenciar admins.", show_alert=True)
+            return
+        
+        admins = db.get_all_admins()
+        
+        mensagem = "👥 <b>Gerenciar Admins</b>\n\n"
+        
+        if not admins:
+            mensagem += "Nenhum admin cadastrado."
+        else:
+            mensagem += "Admins cadastrados:\n\n"
+            for admin in admins:
+                username = admin['username'] or 'Sem username'
+                admin_id = admin['user_id']
+                mensagem += f"• ID: <code>{admin_id}</code> - @{username}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("➕ Adicionar Admin", callback_data="adicionar_admin")],
+            [InlineKeyboardButton("➖ Remover Admin", callback_data="remover_admin_lista")],
+            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data == "adicionar_admin":
+        # Apenas super admin pode adicionar
+        if not is_super_admin(query.from_user.id):
+            await query.answer("❌ Apenas o super admin pode adicionar admins.", show_alert=True)
+            return
+        
+        context.user_data['adicionando_admin'] = True
+        
+        await query.edit_message_text(
+            "➕ <b>Adicionar Admin</b>\n\n"
+            "Envie o ID do usuário que deseja adicionar como admin:",
+            parse_mode='HTML'
+        )
+    
+    elif query.data == "remover_admin_lista":
+        # Apenas super admin pode remover
+        if not is_super_admin(query.from_user.id):
+            await query.answer("❌ Apenas o super admin pode remover admins.", show_alert=True)
+            return
+        
+        admins = db.get_all_admins()
+        
+        if not admins:
+            await query.answer("❌ Nenhum admin cadastrado.", show_alert=True)
+            return
+        
+        mensagem = "➖ <b>Remover Admin</b>\n\nSelecione o admin para remover:"
+        
+        keyboard = []
+        for admin in admins:
+            username = admin['username'] or 'Sem username'
+            admin_id = admin['user_id']
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"❌ {username} ({admin_id})",
+                    callback_data=f"remover_admin_{admin_id}"
+                )
+            ])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="gerenciar_admins")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("remover_admin_"):
+        # Apenas super admin pode remover
+        if not is_super_admin(query.from_user.id):
+            await query.answer("❌ Apenas o super admin pode remover admins.", show_alert=True)
+            return
+        
+        admin_id = int(query.data.split("_")[-1])
+        
+        # Não permite remover o super admin
+        if admin_id == SUPER_ADMIN_ID:
+            await query.answer("❌ Não é possível remover o super admin.", show_alert=True)
+            return
+        
+        removed = db.remove_admin(admin_id)
+        
+        if removed:
+            await query.answer("✅ Admin removido com sucesso!", show_alert=True)
+            # Recarrega a lista
+            await handle_callback(update, context)
+        else:
+            await query.answer("❌ Erro ao remover admin.", show_alert=True)
+    
+    elif query.data == "painel_controle":
+        # Apenas super admin pode acessar
+        if not is_super_admin(query.from_user.id):
+            await query.answer("❌ Apenas o super admin pode acessar o painel de controle.", show_alert=True)
+            return
+        
+        admins = db.get_all_admins()
+        
+        mensagem = "📊 <b>Painel de Controle</b>\n\n"
+        mensagem += "📈 <b>Visão Geral</b>\n\n"
+        
+        # Estatísticas gerais
+        all_canais = db.get_all_canais()
+        total_canais = len(all_canais)
+        
+        mensagem += f"📢 Total de Canais: {total_canais}\n"
+        mensagem += f"👥 Total de Admins: {len(admins)}\n\n"
+        
+        # Canais por admin
+        if admins:
+            mensagem += "📋 <b>Canais por Admin:</b>\n\n"
+            for admin in admins:
+                admin_id = admin['user_id']
+                username = admin['username'] or f"ID {admin_id}"
+                admin_canais = db.get_all_canais(user_id=admin_id)
+                mensagem += f"👤 @{username} ({admin_id}): {len(admin_canais)} canal(is)\n"
+        
+        keyboard = []
+        if admins:
+            for admin in admins:
+                admin_id = admin['user_id']
+                username = admin['username'] or f"ID {admin_id}"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"📊 Ver Canais de @{username}",
+                        callback_data=f"ver_canais_admin_{admin_id}"
+                    )
+                ])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_start")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("ver_canais_admin_"):
+        # Apenas super admin pode ver
+        if not is_super_admin(query.from_user.id):
+            await query.answer("❌ Apenas o super admin pode ver isso.", show_alert=True)
+            return
+        
+        admin_id = int(query.data.split("_")[-1])
+        admin_info = db.get_admin(admin_id)
+        
+        if not admin_info:
+            await query.answer("❌ Admin não encontrado.", show_alert=True)
+            return
+        
+        username = admin_info['username'] or f"ID {admin_id}"
+        canais = db.get_all_canais(user_id=admin_id)
+        
+        mensagem = f"📊 <b>Canais de @{username}</b>\n\n"
+        
+        if not canais:
+            mensagem += "Nenhum canal cadastrado."
+        else:
+            for canal in canais:
+                mensagem += f"📢 <b>{canal['nome']}</b> (ID: {canal['id']})\n"
+                mensagem += f"   • Canais: {len(canal['ids'])}\n"
+                mensagem += f"   • Horários: {len(canal['horarios'])}\n\n"
+        
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="painel_controle")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
 
-@require_super_admin
+@require_admin
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para receber mídias (fotos, vídeos, documentos)"""
     if not context.user_data.get('salvando_midia', False):
@@ -1644,10 +1889,58 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ Erro ao salvar mídia.")
 
-@require_super_admin
+@require_admin
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para mensagens de texto"""
     message_text = update.message.text
+    user_id = update.message.from_user.id
+    
+    # Verifica se está adicionando admin
+    if context.user_data.get('adicionando_admin', False):
+        if not is_super_admin(user_id):
+            context.user_data.pop('adicionando_admin', None)
+            await update.message.reply_text("❌ Você não tem permissão para adicionar admins.")
+            return
+        
+        try:
+            admin_id = int(message_text.strip())
+            
+            # Não permite adicionar o super admin como admin
+            if admin_id == SUPER_ADMIN_ID:
+                await update.message.reply_text("❌ O super admin já tem todas as permissões.")
+                context.user_data.pop('adicionando_admin', None)
+                return
+            
+            # Tenta obter username do usuário
+            try:
+                from telegram import Bot
+                bot = context.bot
+                user_info = await bot.get_chat(admin_id)
+                username = user_info.username
+            except:
+                username = None
+            
+            # Adiciona admin
+            success = db.add_admin(admin_id, username)
+            
+            if success:
+                context.user_data.pop('adicionando_admin', None)
+                await update.message.reply_text(
+                    f"✅ <b>Admin adicionado com sucesso!</b>\n\n"
+                    f"ID: <code>{admin_id}</code>\n"
+                    f"Username: @{username if username else 'Sem username'}\n\n"
+                    f"O usuário agora pode usar o bot.",
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    f"⚠️ Este usuário já é admin ou ocorreu um erro ao adicionar."
+                )
+        except ValueError:
+            await update.message.reply_text(
+                "❌ ID inválido. Por favor, envie apenas números (exemplo: 123456789)."
+            )
+        return
     
     # Verifica se está finalizando grupo de mídias
     if context.user_data.get('criando_grupo', False):
@@ -3161,7 +3454,7 @@ async def enviar_preview_grupo_midia(query, context, group_id: int):
             parse_mode='HTML'
         )
 
-@require_super_admin
+@require_admin
 async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para finalizar criação de grupo de mídias"""
     if not context.user_data.get('salvando_midia') or context.user_data.get('tipo_midia') != 'agrupada':

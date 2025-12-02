@@ -152,6 +152,16 @@ class Database:
             )
         ''')
         
+        # Tabela de admins
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                username TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -1188,4 +1198,104 @@ class Database:
             logger.info(f"⚠️ Poucos grupos restantes no ciclo: {total_restante}")
         
         return next_id
+    
+    # ========== MÉTODOS DE ADMINISTRADORES ==========
+    
+    def add_admin(self, user_id: int, username: Optional[str] = None) -> bool:
+        """
+        Adiciona um admin ao banco de dados
+        Retorna True se adicionado com sucesso, False se já existir
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO admins (user_id, username)
+                VALUES (?, ?)
+            ''', (user_id, username))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            # Admin já existe
+            conn.close()
+            return False
+    
+    def remove_admin(self, user_id: int) -> bool:
+        """
+        Remove um admin do banco de dados
+        Retorna True se removido com sucesso
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM admins WHERE user_id = ?', (user_id,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return deleted
+    
+    def is_admin(self, user_id: int) -> bool:
+        """
+        Verifica se um usuário é admin
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT 1 FROM admins WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone() is not None
+        conn.close()
+        
+        return result
+    
+    def get_all_admins(self) -> List[Dict]:
+        """
+        Retorna lista de todos os admins
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, username, created_at
+            FROM admins
+            ORDER BY created_at DESC
+        ''')
+        
+        admins = []
+        for user_id, username, created_at in cursor.fetchall():
+            admins.append({
+                'user_id': user_id,
+                'username': username,
+                'created_at': created_at
+            })
+        
+        conn.close()
+        return admins
+    
+    def get_admin(self, user_id: int) -> Optional[Dict]:
+        """
+        Retorna informações de um admin específico
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, username, created_at
+            FROM admins
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        return {
+            'user_id': row[0],
+            'username': row[1],
+            'created_at': row[2]
+        }
 
