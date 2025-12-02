@@ -1001,9 +1001,11 @@ class Database:
     
     def update_media_group(self, group_id: int, nome: Optional[str] = None,
                           canal_id: Optional[int] = None,
-                          template_id: Optional[int] = None) -> bool:
+                          template_id: Optional[int] = None,
+                          remove_template: bool = False) -> bool:
         """
         Atualiza informações de um grupo de mídias
+        remove_template: Se True, remove o template (define como NULL)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -1019,7 +1021,10 @@ class Database:
             updates.append('canal_id = ?')
             params.append(canal_id)
         
-        if template_id is not None:
+        if remove_template:
+            # Remove template (define como NULL)
+            updates.append('template_id = NULL')
+        elif template_id is not None:
             updates.append('template_id = ?')
             params.append(template_id)
         

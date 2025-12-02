@@ -248,13 +248,43 @@ class MediaHandler:
         
         return InlineKeyboardMarkup(keyboard)
     
+    def get_auto_template(self, media_group: Dict, database: Database) -> Optional[Dict]:
+        """
+        Busca template automático para um grupo de mídias
+        Se o grupo não tiver template associado, busca qualquer template do canal
+        """
+        # Se já tem template associado, retorna None (não precisa buscar)
+        if media_group.get('template_id'):
+            return None
+        
+        # Se não tem canal_id, não pode buscar template automático
+        if not media_group.get('canal_id'):
+            return None
+        
+        # Busca templates do canal
+        templates = database.get_templates_by_canal(media_group['canal_id'])
+        if templates:
+            # Retorna o primeiro template disponível
+            return database.get_template(templates[0]['id'])
+        
+        return None
+    
     async def send_media_group_with_template(self, context: ContextTypes.DEFAULT_TYPE,
                                             chat_id: str, media_group: Dict,
                                             template: Optional[Dict] = None,
-                                            global_buttons: Optional[List[Dict]] = None) -> bool:
+                                            global_buttons: Optional[List[Dict]] = None,
+                                            database: Optional[Database] = None,
+                                            use_auto_template: bool = True) -> bool:
         """
         Envia um grupo de mídias com template e botões aplicados
+        use_auto_template: Se True e não houver template, busca automaticamente do canal
         """
+        # Se não tem template e use_auto_template está ativo, busca template automático
+        if not template and use_auto_template and database:
+            auto_template = self.get_auto_template(media_group, database)
+            if auto_template:
+                template = auto_template
+        
         # Prepara caption do template
         caption = None
         reply_markup = None

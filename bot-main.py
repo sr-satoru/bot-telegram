@@ -1033,6 +1033,114 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Volta para os detalhes do grupo
         await mostrar_detalhes_grupo_midia(query, context, group_id)
     
+    elif query.data.startswith("remover_template_grupo_"):
+        # Remove template do grupo de mídias
+        group_id = int(query.data.split("_")[-1])
+        
+        # Atualiza o grupo removendo o template
+        success = db.update_media_group(group_id, remove_template=True)
+        
+        if success:
+            await query.answer("✅ Template removido!")
+            await mostrar_detalhes_grupo_midia(query, context, group_id)
+        else:
+            await query.answer("❌ Erro ao remover template", show_alert=True)
+    
+    elif query.data == "associar_template_automatico":
+        # Associa template automaticamente a todos os grupos sem template
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        user_id = query.from_user.id
+        
+        if not canal_id:
+            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            return
+        
+        # Busca templates do canal
+        templates = db.get_templates_by_canal(canal_id)
+        
+        if not templates:
+            await query.edit_message_text(
+                "❌ Nenhum template encontrado neste canal.\n\n"
+                "Crie um template primeiro em 'Gerenciar Templates'.",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Se houver apenas um template, associa automaticamente
+        if len(templates) == 1:
+            template_id = templates[0]['id']
+            # Busca grupos sem template
+            media_groups = db.get_media_groups_by_user(user_id, canal_id)
+            grupos_sem_template = [g for g in media_groups if not g.get('template_id')]
+            
+            if not grupos_sem_template:
+                await query.edit_message_text(
+                    "✅ Todos os grupos já têm template associado!",
+                    parse_mode='HTML'
+                )
+                return
+            
+            # Associa template a todos os grupos sem template
+            for group in grupos_sem_template:
+                db.update_media_group(group['id'], template_id=template_id)
+            
+            await query.edit_message_text(
+                f"✅ Template associado automaticamente a {len(grupos_sem_template)} grupo(s)!",
+                parse_mode='HTML'
+            )
+            await mostrar_menu_medias(query, context)
+        else:
+            # Se houver múltiplos templates, pergunta qual usar
+            mensagem = "📝 <b>Associar Template Automaticamente</b>\n\n"
+            mensagem += "Selecione o template para associar a todos os grupos sem template:"
+            
+            keyboard = []
+            for template in templates:
+                preview = template['template_mensagem'][:30] + "..." if len(template['template_mensagem']) > 30 else template['template_mensagem']
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"📄 {preview}",
+                        callback_data=f"confirmar_associar_auto_{template['id']}"
+                    )
+                ])
+            
+            keyboard.append([
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_medias")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("confirmar_associar_auto_"):
+        # Confirma associação automática de template
+        template_id = int(query.data.split("_")[-1])
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        user_id = query.from_user.id
+        
+        # Busca grupos sem template
+        media_groups = db.get_media_groups_by_user(user_id, canal_id)
+        grupos_sem_template = [g for g in media_groups if not g.get('template_id')]
+        
+        if not grupos_sem_template:
+            await query.edit_message_text(
+                "✅ Todos os grupos já têm template associado!",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Associa template a todos os grupos sem template
+        for group in grupos_sem_template:
+            db.update_media_group(group['id'], template_id=template_id)
+        
+        await query.edit_message_text(
+            f"✅ Template associado automaticamente a {len(grupos_sem_template)} grupo(s)!",
+            parse_mode='HTML'
+        )
+        await mostrar_menu_medias(query, context)
+    
+
     elif query.data == "listar_grupos_midias":
         # Lista todos os grupos de mídias
         dados = context.user_data.get('editando', {})
@@ -2857,6 +2965,13 @@ async def mostrar_menu_medias(query, context):
         keyboard.append([
             InlineKeyboardButton("📋 Ver Grupos de Mídias", callback_data="listar_grupos_midias")
         ])
+        
+        # Verifica se há grupos sem template
+        grupos_sem_template = [g for g in media_groups if not g.get('template_id')]
+        if grupos_sem_template:
+            keyboard.append([
+                InlineKeyboardButton("⚡ Associar Template Automaticamente", callback_data="associar_template_automatico")
+            ])
     
     keyboard.append([
         InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
@@ -2890,7 +3005,15 @@ async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
         if template:
             template_info = f"\n📝 Template: ID {group['template_id']}"
     else:
-        template_info = "\n📝 Template: ❌ Nenhum template associado"
+        # Verifica se há templates disponíveis no canal para uso automático
+        if group.get('canal_id'):
+            templates = db.get_templates_by_canal(group['canal_id'])
+            if templates:
+                template_info = f"\n📝 Template: ⚡ Automático (usará qualquer template do canal)"
+            else:
+                template_info = "\n📝 Template: ❌ Nenhum template disponível"
+        else:
+            template_info = "\n📝 Template: ❌ Nenhum template associado"
     
     mensagem += template_info
     
@@ -2911,8 +3034,13 @@ async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
         ],
     ]
     
-    # Adiciona botão para associar template se não tiver
-    if not group.get('template_id'):
+    # Botões de template
+    if group.get('template_id'):
+        keyboard.append([
+            InlineKeyboardButton("📝 Trocar Template", callback_data=f"associar_template_grupo_{group_id}"),
+            InlineKeyboardButton("❌ Remover Template", callback_data=f"remover_template_grupo_{group_id}"),
+        ])
+    else:
         keyboard.append([
             InlineKeyboardButton("📝 Associar Template", callback_data=f"associar_template_grupo_{group_id}"),
         ])
@@ -2940,7 +3068,8 @@ async def enviar_preview_grupo_midia(query, context, group_id: int):
         await query.edit_message_text("❌ Grupo de mídias está vazio.", parse_mode='HTML')
         return
     
-    # Busca template se houver
+    # Busca template se houver associado
+    # Se não houver, o media_handler buscará automaticamente
     template = None
     if group.get('template_id'):
         template = db.get_template(group['template_id'])
@@ -2964,7 +3093,9 @@ async def enviar_preview_grupo_midia(query, context, group_id: int):
             chat_id=user_id,  # Envia para o próprio usuário como preview
             media_group=group,
             template=template,
-            global_buttons=global_buttons
+            global_buttons=global_buttons,
+            database=db,
+            use_auto_template=True
         )
         
         if success:
