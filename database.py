@@ -482,6 +482,25 @@ class Database:
             'created_at': created_at
         }
     
+    def get_link_info(self, link_id: int) -> Optional[Tuple]:
+        """
+        Recupera informações de um link pelo ID
+        Retorna (link_id, template_id, segmento, url, ordem) ou None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, template_id, segmento_com_link, link_da_mensagem, ordem
+            FROM template_links
+            WHERE id = ?
+        ''', (link_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result
+    
     def delete_template(self, template_id: int) -> bool:
         """
         Deleta um template e todos os seus links

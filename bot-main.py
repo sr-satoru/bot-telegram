@@ -249,6 +249,146 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
     
+    elif query.data == "edit_templates":
+        # Lista templates do canal
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        
+        if not canal_id:
+            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            return
+        
+        templates = db.get_templates_by_canal(canal_id)
+        
+        if not templates:
+            keyboard = [
+                [InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "📝 <b>Gerenciar Templates</b>\n\n❌ Nenhum template encontrado.",
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        mensagem = f"📝 <b>Gerenciar Templates</b>\n\n"
+        mensagem += f"Total: {len(templates)} template(s)\n\n"
+        
+        keyboard = []
+        for template in templates:
+            template_id = template['id']
+            template_msg = template['template_mensagem']
+            preview = template_msg[:30] + "..." if len(template_msg) > 30 else template_msg
+            keyboard.append([
+                InlineKeyboardButton(f"📄 {preview}", callback_data=f"edit_template_{template_id}"),
+                InlineKeyboardButton("👁️ Preview", callback_data=f"preview_template_{template_id}")
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("preview_template_"):
+        # Mostra preview do template formatado
+        template_id = int(query.data.split("_")[-1])
+        template = db.get_template(template_id)
+        
+        if not template:
+            await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
+            return
+        
+        template_mensagem = template['template_mensagem']
+        links = template['links']  # Lista de dicionários com 'segmento' e 'link'
+        
+        # Converte para formato de tuplas (segmento, link_url)
+        links_tuples = [(link['segmento'], link['link']) for link in links]
+        
+        # Formata a mensagem com links HTML
+        formatted_message = parser.format_message_with_links(template_mensagem, links_tuples)
+        
+        # Monta mensagem com informações
+        preview_text = f"👁️ <b>Preview - Template ID: {template_id}</b>\n\n"
+        preview_text += f"📄 <b>Mensagem formatada:</b>\n\n"
+        preview_text += formatted_message
+        
+        # Botões para voltar
+        keyboard = [
+            [
+                InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates"),
+                InlineKeyboardButton("✏️ Editar Links", callback_data=f"edit_template_{template_id}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(preview_text, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("edit_template_"):
+        # Mostra painel de edição de links do template
+        template_id = int(query.data.split("_")[-1])
+        await show_edit_panel(query, template_id, context)
+    
+    elif query.data == "edit_cancel":
+        # Cancela edição de links
+        await query.edit_message_text("❌ Edição cancelada.", parse_mode='HTML')
+        return
+    
+    elif query.data.startswith("edit_all_"):
+        # Edita todos os links do template
+        template_id = int(query.data.split("_")[-1])
+        template = db.get_template_with_link_ids(template_id)
+        
+        if not template:
+            await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
+            return
+        
+        num_links = len(template['links'])
+        
+        # Salva contexto para edição de todos
+        context.user_data['editing_all_links'] = True
+        context.user_data['editing_template_id'] = template_id
+        context.user_data['editing_num_links'] = num_links
+        
+        await query.edit_message_text(
+            f"🔗 <b>Editando todos os links</b>\n\n"
+            f"📝 Template ID: {template_id}\n"
+            f"🔗 Total: {num_links} segmento(s)\n\n"
+            f"Envie o URL para TODOS os segmentos:\n"
+            f"Ex: <code>https://example.com</code>",
+            parse_mode='HTML'
+        )
+        return
+    
+    elif query.data.startswith("edit_link_"):
+        # Edita um link específico
+        link_id = int(query.data.split("_")[-1])
+        link_info = db.get_link_info(link_id)
+        
+        if not link_info:
+            await query.edit_message_text("❌ Link não encontrado.", parse_mode='HTML')
+            return
+        
+        link_id_db, template_id, segmento, url_atual, ordem = link_info
+        
+        # Salva contexto para edição
+        context.user_data['editing_link_id'] = link_id
+        context.user_data['editing_template_id'] = template_id
+        context.user_data['editing_segmento'] = segmento
+        context.user_data['editing_ordem'] = ordem
+        
+        url_display = url_atual if len(url_atual) <= 50 else url_atual[:47] + "..."
+        await query.edit_message_text(
+            f"✏️ <b>Editando segmento {ordem}</b>\n\n"
+            f"📝 Segmento: '{segmento}'\n"
+            f"🔗 URL atual: {url_display}\n\n"
+            f"Envie o novo URL:\n"
+            f"Ex: <code>https://example.com</code>",
+            parse_mode='HTML'
+        )
+    
     elif query.data == "edit_voltar":
         # Volta para o menu de edição
         await mostrar_menu_edicao(query, context)
@@ -1092,6 +1232,76 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Mostra menu de horários
             await mostrar_menu_horarios_text(msg, context)
+            return
+    
+    # Verifica se está editando links de template
+    if 'editing_all_links' in context.user_data:
+        # Editando todos os links
+        link_url = message_text.strip()
+        
+        if not (link_url.startswith('http://') or link_url.startswith('https://')):
+            await update.message.reply_text(
+                "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                parse_mode='HTML'
+            )
+            return
+        
+        template_id = context.user_data['editing_template_id']
+        num_links = context.user_data['editing_num_links']
+        
+        # Atualiza todos os links
+        updated_count = db.update_all_links(template_id, link_url)
+        
+        if updated_count > 0:
+            # Limpa contexto
+            del context.user_data['editing_all_links']
+            del context.user_data['editing_template_id']
+            del context.user_data['editing_num_links']
+            
+            # Retorna ao painel de edição
+            url_display = link_url if len(link_url) <= 50 else link_url[:47] + "..."
+            success_msg = f"Todos os {updated_count} segmentos atualizados para: {url_display}"
+            
+            # Envia mensagem de sucesso e mostra painel
+            msg = await update.message.reply_text("✅ Links atualizados!", parse_mode='HTML')
+            await show_edit_panel(msg, template_id, context, success_msg)
+        else:
+            await update.message.reply_text("❌ Erro ao atualizar links.", parse_mode='HTML')
+        return
+    
+    if 'editing_link_id' in context.user_data:
+        # Editando um link específico
+        link_url = message_text.strip()
+        
+        if not (link_url.startswith('http://') or link_url.startswith('https://')):
+            await update.message.reply_text(
+                "⚠️ URL inválida. Use formato: <code>http://</code> ou <code>https://</code>",
+                parse_mode='HTML'
+            )
+            return
+        
+        link_id = context.user_data['editing_link_id']
+        template_id = context.user_data['editing_template_id']
+        segmento = context.user_data['editing_segmento']
+        ordem = context.user_data['editing_ordem']
+        
+        # Atualiza o link
+        updated = db.update_link(link_id, link_url)
+        
+        if updated:
+            # Limpa contexto
+            del context.user_data['editing_link_id']
+            del context.user_data['editing_template_id']
+            del context.user_data['editing_segmento']
+            del context.user_data['editing_ordem']
+            
+            # Retorna ao painel de edição
+            url_display = link_url if len(link_url) <= 50 else link_url[:47] + "..."
+            success_msg = f"Segmento {ordem} ('{segmento}') atualizado: {url_display}"
+            await show_edit_panel(update.message, template_id, context, success_msg)
+        else:
+            await update.message.reply_text("❌ Erro ao atualizar link.", parse_mode='HTML')
+        return
 
 def validar_horario(h):
     """Valida formato de horário (HH:MM em 24h)"""
@@ -1192,6 +1402,9 @@ async def mostrar_menu_edicao(query, context):
         [
             InlineKeyboardButton("🕒 Gerenciar Horários", callback_data="edit_horarios_menu"),
         ],
+        [
+            InlineKeyboardButton("📝 Gerenciar Templates", callback_data="edit_templates"),
+        ],
     ]
     
     if dados.get('changes_made', False):
@@ -1274,6 +1487,74 @@ async def mostrar_menu_horarios_edicao(query, context):
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+
+async def show_edit_panel(query_or_message, template_id: int, context, success_message: str = None):
+    """
+    Mostra o painel de edição de links de um template
+    Pode receber CallbackQuery ou Message
+    """
+    template = db.get_template_with_link_ids(template_id)
+    
+    if not template:
+        if hasattr(query_or_message, 'edit_message_text'):
+            await query_or_message.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
+        else:
+            await query_or_message.reply_text("❌ Template não encontrado.", parse_mode='HTML')
+        return
+    
+    template_mensagem = template['template_mensagem']
+    links = template['links']  # [(link_id, segmento, url, ordem), ...]
+    
+    # Monta mensagem
+    message_text = f"📝 <b>Template ID: {template_id}</b>\n\n"
+    message_text += f"📄 <b>Mensagem:</b>\n{template_mensagem}\n\n"
+    
+    if success_message:
+        message_text += f"✅ {success_message}\n\n"
+    
+    message_text += f"🔗 <b>Segmentos ({len(links)}):</b>\n\n"
+    
+    # Cria botões para cada segmento
+    keyboard = []
+    for link_id, segmento, url, ordem in links:
+        url_display = url if len(url) <= 40 else url[:37] + "..."
+        message_text += f"{ordem}. '{segmento}'\n   → {url_display}\n\n"
+        
+        segmento_display = segmento[:20] + "..." if len(segmento) > 20 else segmento
+        keyboard.append([
+            InlineKeyboardButton(
+                f"✏️ Segmento {ordem}: {segmento_display}",
+                callback_data=f"edit_link_{link_id}"
+            )
+        ])
+    
+    # Botão para editar todos
+    if len(links) > 1:
+        keyboard.append([
+            InlineKeyboardButton("🔗 Editar todos para o mesmo link", callback_data=f"edit_all_{template_id}")
+        ])
+    
+    # Botões de navegação
+    dados = context.user_data.get('editando', {})
+    canal_id = dados.get('canal_id')
+    if canal_id:
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="edit_cancel")
+        ])
+    else:
+        keyboard.append([
+            InlineKeyboardButton("❌ Cancelar", callback_data="edit_cancel")
+        ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Envia ou edita mensagem
+    if hasattr(query_or_message, 'edit_message_text'):
+        await query_or_message.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        # Se for Message, edita a mensagem anterior
+        await query_or_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
 
 def main():
     """Função principal para iniciar o bot"""
