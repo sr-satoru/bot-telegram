@@ -95,6 +95,49 @@ class Database:
             )
         ''')
         
+        # Tabela de grupos de mídias
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS media_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                canal_id INTEGER,
+                template_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (canal_id) REFERENCES canais(id) ON DELETE SET NULL,
+                FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE SET NULL
+            )
+        ''')
+        
+        # Tabela de mídias individuais (relação N:N com media_groups)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS medias (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id TEXT NOT NULL,
+                file_unique_id TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                file_size INTEGER,
+                width INTEGER,
+                height INTEGER,
+                duration INTEGER,
+                thumbnail_file_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabela de relação entre media_groups e medias
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS media_group_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_group_id INTEGER NOT NULL,
+                media_id INTEGER NOT NULL,
+                ordem INTEGER NOT NULL,
+                caption TEXT,
+                FOREIGN KEY (media_group_id) REFERENCES media_groups(id) ON DELETE CASCADE,
+                FOREIGN KEY (media_id) REFERENCES medias(id) ON DELETE CASCADE
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -720,4 +763,276 @@ class Database:
         conn.close()
         
         return deleted
+    
+    # ========== MÉTODOS DE MÍDIAS ==========
+    
+    def save_media(self, file_id: str, file_unique_id: str, media_type: str, 
+                   file_size: Optional[int] = None, width: Optional[int] = None,
+                   height: Optional[int] = None, duration: Optional[int] = None,
+                   thumbnail_file_id: Optional[str] = None) -> int:
+        """
+        Salva uma mídia individual no banco
+        Retorna o ID da mídia salva
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO medias (file_id, file_unique_id, media_type, file_size, 
+                              width, height, duration, thumbnail_file_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (file_id, file_unique_id, media_type, file_size, width, height, duration, thumbnail_file_id))
+        
+        media_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return media_id
+    
+    def get_media(self, media_id: int) -> Optional[Dict]:
+        """
+        Recupera uma mídia pelo ID
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, file_id, file_unique_id, media_type, file_size,
+                   width, height, duration, thumbnail_file_id, created_at
+            FROM medias
+            WHERE id = ?
+        ''', (media_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        return {
+            'id': row[0],
+            'file_id': row[1],
+            'file_unique_id': row[2],
+            'media_type': row[3],
+            'file_size': row[4],
+            'width': row[5],
+            'height': row[6],
+            'duration': row[7],
+            'thumbnail_file_id': row[8],
+            'created_at': row[9]
+        }
+    
+    def create_media_group(self, nome: str, user_id: int, canal_id: Optional[int] = None,
+                          template_id: Optional[int] = None) -> int:
+        """
+        Cria um grupo de mídias
+        Retorna o ID do grupo criado
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO media_groups (nome, user_id, canal_id, template_id)
+            VALUES (?, ?, ?, ?)
+        ''', (nome, user_id, canal_id, template_id))
+        
+        group_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return group_id
+    
+    def add_media_to_group(self, media_group_id: int, media_id: int, ordem: int,
+                          caption: Optional[str] = None) -> bool:
+        """
+        Adiciona uma mídia a um grupo
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO media_group_items (media_group_id, media_id, ordem, caption)
+            VALUES (?, ?, ?, ?)
+        ''', (media_group_id, media_id, ordem, caption))
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+    
+    def get_media_group(self, group_id: int) -> Optional[Dict]:
+        """
+        Recupera um grupo de mídias completo com todas as mídias
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Busca o grupo
+        cursor.execute('''
+            SELECT id, nome, user_id, canal_id, template_id, created_at
+            FROM media_groups
+            WHERE id = ?
+        ''', (group_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+        
+        group_id_db, nome, user_id, canal_id, template_id, created_at = row
+        
+        # Busca as mídias do grupo
+        cursor.execute('''
+            SELECT m.id, m.file_id, m.file_unique_id, m.media_type, m.file_size,
+                   m.width, m.height, m.duration, m.thumbnail_file_id,
+                   mgi.ordem, mgi.caption
+            FROM media_group_items mgi
+            JOIN medias m ON mgi.media_id = m.id
+            WHERE mgi.media_group_id = ?
+            ORDER BY mgi.ordem
+        ''', (group_id_db,))
+        
+        medias = []
+        for row in cursor.fetchall():
+            medias.append({
+                'id': row[0],
+                'file_id': row[1],
+                'file_unique_id': row[2],
+                'media_type': row[3],
+                'file_size': row[4],
+                'width': row[5],
+                'height': row[6],
+                'duration': row[7],
+                'thumbnail_file_id': row[8],
+                'ordem': row[9],
+                'caption': row[10]
+            })
+        
+        conn.close()
+        
+        return {
+            'id': group_id_db,
+            'nome': nome,
+            'user_id': user_id,
+            'canal_id': canal_id,
+            'template_id': template_id,
+            'medias': medias,
+            'created_at': created_at
+        }
+    
+    def get_media_groups_by_user(self, user_id: int, canal_id: Optional[int] = None) -> List[Dict]:
+        """
+        Recupera todos os grupos de mídias de um usuário
+        Se canal_id for fornecido, filtra por canal
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        if canal_id:
+            cursor.execute('''
+                SELECT id, nome, user_id, canal_id, template_id, created_at
+                FROM media_groups
+                WHERE user_id = ? AND canal_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id, canal_id))
+        else:
+            cursor.execute('''
+                SELECT id, nome, user_id, canal_id, template_id, created_at
+                FROM media_groups
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id,))
+        
+        groups = cursor.fetchall()
+        results = []
+        
+        for group_id, nome, user_id_db, canal_id_db, template_id, created_at in groups:
+            # Conta mídias do grupo
+            cursor.execute('''
+                SELECT COUNT(*) FROM media_group_items WHERE media_group_id = ?
+            ''', (group_id,))
+            count = cursor.fetchone()[0]
+            
+            results.append({
+                'id': group_id,
+                'nome': nome,
+                'user_id': user_id_db,
+                'canal_id': canal_id_db,
+                'template_id': template_id,
+                'media_count': count,
+                'created_at': created_at
+            })
+        
+        conn.close()
+        return results
+    
+    def delete_media_group(self, group_id: int) -> bool:
+        """
+        Deleta um grupo de mídias e todas as suas relações
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM media_groups WHERE id = ?', (group_id,))
+        
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return deleted
+    
+    def remove_media_from_group(self, group_id: int, media_id: int) -> bool:
+        """
+        Remove uma mídia específica de um grupo
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            DELETE FROM media_group_items
+            WHERE media_group_id = ? AND media_id = ?
+        ''', (group_id, media_id))
+        
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return deleted
+    
+    def update_media_group(self, group_id: int, nome: Optional[str] = None,
+                          canal_id: Optional[int] = None,
+                          template_id: Optional[int] = None) -> bool:
+        """
+        Atualiza informações de um grupo de mídias
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        updates = []
+        params = []
+        
+        if nome is not None:
+            updates.append('nome = ?')
+            params.append(nome)
+        
+        if canal_id is not None:
+            updates.append('canal_id = ?')
+            params.append(canal_id)
+        
+        if template_id is not None:
+            updates.append('template_id = ?')
+            params.append(template_id)
+        
+        if not updates:
+            conn.close()
+            return False
+        
+        params.append(group_id)
+        query = f'UPDATE media_groups SET {", ".join(updates)} WHERE id = ?'
+        
+        cursor.execute(query, params)
+        conn.commit()
+        conn.close()
+        
+        return True
 

@@ -7,6 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from database import Database
 from parser import MessageParser
+from media_handler import MediaHandler
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -24,9 +25,10 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN não encontrado no arquivo .env")
 
-# Inicializa banco de dados e parser
+# Inicializa banco de dados, parser e media handler
 db = Database()
 parser = MessageParser()
+media_handler = MediaHandler(db)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /start"""
@@ -867,6 +869,208 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
     
+    elif query.data == "edit_medias":
+        # Menu para gerenciar mídias
+        await mostrar_menu_medias(query, context)
+    
+    elif query.data == "salvar_midia_unica":
+        # Inicia fluxo para salvar mídia única
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        
+        if not canal_id:
+            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            return
+        
+        context.user_data['salvando_midia'] = True
+        context.user_data['tipo_midia'] = 'unica'
+        context.user_data['canal_id_midia'] = canal_id
+        
+        keyboard = [
+            [InlineKeyboardButton("❌ Cancelar", callback_data="edit_medias")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "📸 <b>Salvar Mídia Única</b>\n\n"
+            "Envie uma foto ou vídeo para salvar.\n\n"
+            "A mídia será armazenada usando file_id (sem salvar no servidor).",
+            reply_markup=reply_markup,
+            parse_mode='HTML'
+        )
+    
+    elif query.data == "salvar_midia_agrupada":
+        # Inicia fluxo para salvar mídia agrupada
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        
+        if not canal_id:
+            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            return
+        
+        context.user_data['salvando_midia'] = True
+        context.user_data['tipo_midia'] = 'agrupada'
+        context.user_data['canal_id_midia'] = canal_id
+        context.user_data['medias_temporarias'] = []
+        context.user_data['criando_grupo'] = False
+        
+        keyboard = [
+            [InlineKeyboardButton("❌ Cancelar", callback_data="edit_medias")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "📦 <b>Salvar Mídia Agrupada</b>\n\n"
+            "Envie múltiplas fotos ou vídeos (até 10).\n\n"
+            "Envie as mídias uma por vez. Quando terminar, use /finalizar_grupo",
+            reply_markup=reply_markup,
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("ver_grupo_midia_"):
+        # Mostra detalhes de um grupo de mídias
+        group_id = int(query.data.split("_")[-1])
+        await mostrar_detalhes_grupo_midia(query, context, group_id)
+    
+    elif query.data.startswith("deletar_grupo_midia_"):
+        # Confirma deleção de grupo de mídias
+        group_id = int(query.data.split("_")[-1])
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Confirmar", callback_data=f"confirmar_deletar_grupo_{group_id}"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="edit_medias")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "⚠️ <b>Confirmar Deleção</b>\n\n"
+            f"Tem certeza que deseja deletar este grupo de mídias?",
+            reply_markup=reply_markup,
+            parse_mode='HTML'
+        )
+    
+    elif query.data.startswith("confirmar_deletar_grupo_"):
+        # Deleta grupo de mídias
+        group_id = int(query.data.split("_")[-1])
+        
+        deleted = db.delete_media_group(group_id)
+        
+        if deleted:
+            await query.edit_message_text(
+                "✅ Grupo de mídias deletado com sucesso!",
+                parse_mode='HTML'
+            )
+            await mostrar_menu_medias(query, context)
+        else:
+            await query.edit_message_text(
+                "❌ Erro ao deletar grupo de mídias.",
+                parse_mode='HTML'
+            )
+    
+    elif query.data.startswith("preview_grupo_midia_"):
+        # Mostra preview do grupo de mídias com template e botões
+        group_id = int(query.data.split("_")[-1])
+        await enviar_preview_grupo_midia(query, context, group_id)
+    
+    elif query.data.startswith("associar_template_grupo_"):
+        # Inicia associação de template ao grupo de mídias
+        group_id = int(query.data.split("_")[-1])
+        
+        # Busca templates do canal
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        
+        if not canal_id:
+            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            return
+        
+        templates = db.get_templates_by_canal(canal_id)
+        
+        if not templates:
+            await query.edit_message_text(
+                "❌ Nenhum template encontrado neste canal.\n\n"
+                "Crie um template primeiro em 'Gerenciar Templates'.",
+                parse_mode='HTML'
+            )
+            return
+        
+        mensagem = "📝 <b>Associar Template</b>\n\n"
+        mensagem += "Selecione o template para associar ao grupo de mídias:"
+        
+        keyboard = []
+        for template in templates:
+            preview = template['template_mensagem'][:30] + "..." if len(template['template_mensagem']) > 30 else template['template_mensagem']
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📄 {preview}",
+                    callback_data=f"confirmar_associar_template_{group_id}_{template['id']}"
+                )
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Voltar", callback_data=f"ver_grupo_midia_{group_id}")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    elif query.data.startswith("confirmar_associar_template_"):
+        # Confirma associação de template ao grupo
+        parts = query.data.split("_")
+        group_id = int(parts[-2])
+        template_id = int(parts[-1])
+        
+        # Atualiza o grupo de mídias
+        db.update_media_group(group_id, template_id=template_id)
+        
+        await query.edit_message_text(
+            f"✅ Template associado com sucesso!",
+            parse_mode='HTML'
+        )
+        
+        # Volta para os detalhes do grupo
+        await mostrar_detalhes_grupo_midia(query, context, group_id)
+    
+    elif query.data == "listar_grupos_midias":
+        # Lista todos os grupos de mídias
+        dados = context.user_data.get('editando', {})
+        canal_id = dados.get('canal_id')
+        user_id = query.from_user.id
+        
+        media_groups = db.get_media_groups_by_user(user_id, canal_id)
+        
+        if not media_groups:
+            await query.edit_message_text(
+                "❌ Nenhum grupo de mídias encontrado.",
+                parse_mode='HTML'
+            )
+            return
+        
+        mensagem = "📦 <b>Grupos de Mídias</b>\n\n"
+        
+        keyboard = []
+        for group in media_groups:
+            nome = group['nome']
+            group_id = group['id']
+            count = group.get('media_count', 0)
+            
+            display = f"📦 {nome} ({count})"
+            if len(display) > 40:
+                display = display[:37] + "..."
+            
+            keyboard.append([
+                InlineKeyboardButton(display, callback_data=f"ver_grupo_midia_{group_id}")
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_medias")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
     elif query.data == "edit_voltar":
         # Volta para o menu de edição
         await mostrar_menu_edicao(query, context)
@@ -1215,9 +1419,129 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(mensagem, parse_mode='HTML')
     
 
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler para receber mídias (fotos, vídeos, documentos)"""
+    if not context.user_data.get('salvando_midia', False):
+        return  # Ignora mídias se não estiver no modo de salvar
+    
+    # Verifica se tem documento (imagem/vídeo enviado como arquivo)
+    if update.message.document:
+        doc = update.message.document
+        # Só processa se for imagem ou vídeo
+        if not doc.mime_type or (not doc.mime_type.startswith('image/') and not doc.mime_type.startswith('video/')):
+            return  # Ignora documentos que não são imagens/vídeos
+    
+    tipo_midia = context.user_data.get('tipo_midia')
+    canal_id = context.user_data.get('canal_id_midia')
+    
+    if not tipo_midia or not canal_id:
+        return
+    
+    # Extrai informações da mídia
+    media_info = media_handler.extract_media_info(update)
+    
+    if not media_info:
+        await update.message.reply_text("❌ Tipo de mídia não suportado. Envie uma foto ou vídeo.")
+        return
+    
+    if tipo_midia == 'unica':
+        # Salva mídia única
+        media_id = media_handler.save_media_from_message(update)
+        
+        if media_id:
+            # Cria um grupo de mídias com apenas uma mídia
+            user_id = update.message.from_user.id
+            group_id = db.create_media_group(
+                nome=f"Mídia Única - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                user_id=user_id,
+                canal_id=canal_id
+            )
+            
+            db.add_media_to_group(group_id, media_id, ordem=1)
+            
+            # Limpa contexto
+            for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia']:
+                context.user_data.pop(key, None)
+            
+            await update.message.reply_text(
+                "✅ <b>Mídia salva com sucesso!</b>\n\n"
+                f"📦 Grupo criado: ID {group_id}\n"
+                f"📸 Tipo: {media_info['media_type']}",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text("❌ Erro ao salvar mídia.")
+    
+    elif tipo_midia == 'agrupada':
+        # Adiciona mídia ao grupo temporário
+        media_id = media_handler.save_media_from_message(update)
+        
+        if media_id:
+            medias_temp = context.user_data.get('medias_temporarias', [])
+            
+            if len(medias_temp) >= 10:
+                await update.message.reply_text("❌ Máximo de 10 mídias por grupo. Use /finalizar_grupo para salvar.")
+                return
+            
+            medias_temp.append(media_id)
+            context.user_data['medias_temporarias'] = medias_temp
+            
+            await update.message.reply_text(
+                f"✅ <b>Mídia adicionada!</b>\n\n"
+                f"📊 Total: {len(medias_temp)}/10 mídias\n\n"
+                f"Envie mais mídias ou use /finalizar_grupo para salvar o grupo.",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text("❌ Erro ao salvar mídia.")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para mensagens de texto"""
     message_text = update.message.text
+    
+    # Verifica se está finalizando grupo de mídias
+    if context.user_data.get('criando_grupo', False):
+        etapa = context.user_data.get('etapa_grupo')
+        
+        if etapa == 'nome':
+            nome_grupo = message_text.strip()
+            
+            if not nome_grupo:
+                await update.message.reply_text("❌ Nome não pode estar vazio.")
+                return
+            
+            medias_temp = context.user_data.get('medias_temporarias', [])
+            canal_id = context.user_data.get('canal_id_midia')
+            user_id = update.message.from_user.id
+            
+            if not medias_temp:
+                await update.message.reply_text("❌ Nenhuma mídia no grupo.")
+                return
+            
+            # Cria o grupo de mídias
+            group_id = db.create_media_group(
+                nome=nome_grupo,
+                user_id=user_id,
+                canal_id=canal_id
+            )
+            
+            # Adiciona todas as mídias ao grupo
+            for ordem, media_id in enumerate(medias_temp, start=1):
+                db.add_media_to_group(group_id, media_id, ordem=ordem)
+            
+            # Limpa contexto
+            for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 
+                       'medias_temporarias', 'criando_grupo', 'etapa_grupo']:
+                context.user_data.pop(key, None)
+            
+            await update.message.reply_text(
+                f"✅ <b>Grupo de mídias criado com sucesso!</b>\n\n"
+                f"📦 Nome: {nome_grupo}\n"
+                f"🆔 ID: {group_id}\n"
+                f"📊 Mídias: {len(medias_temp)}",
+                parse_mode='HTML'
+            )
+            return
     
     # Verifica se está criando um template
     if context.user_data.get('criando_template', False):
@@ -2299,6 +2623,9 @@ async def mostrar_menu_edicao(query, context):
         [
             InlineKeyboardButton("🔘 Botões Globais", callback_data="edit_global_buttons"),
         ],
+        [
+            InlineKeyboardButton("📸 Gerenciar Mídias", callback_data="edit_medias"),
+        ],
     ]
     
     if dados.get('changes_made', False):
@@ -2492,6 +2819,207 @@ async def show_edit_panel(query_or_message, template_id: int, context, success_m
         # Se for Message, edita a mensagem anterior
         await query_or_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
 
+async def mostrar_menu_medias(query, context):
+    """Mostra o menu de gerenciamento de mídias"""
+    dados = context.user_data.get('editando', {})
+    canal_id = dados.get('canal_id')
+    user_id = query.from_user.id
+    
+    if not canal_id:
+        await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+        return
+    
+    # Busca grupos de mídias do canal
+    media_groups = db.get_media_groups_by_user(user_id, canal_id)
+    
+    mensagem = "📸 <b>Gerenciar Mídias</b>\n\n"
+    mensagem += "Escolha uma opção:\n\n"
+    
+    if media_groups:
+        mensagem += f"📦 <b>Grupos de Mídias ({len(media_groups)}):</b>\n"
+        for group in media_groups[:5]:  # Mostra até 5
+            mensagem += f"   • {group['nome']} ({group['media_count']} mídias)\n"
+        if len(media_groups) > 5:
+            mensagem += f"   ... e mais {len(media_groups) - 5}\n"
+    else:
+        mensagem += "❌ Nenhum grupo de mídias criado ainda.\n"
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("📸 Salvar Mídia Única", callback_data="salvar_midia_unica"),
+        ],
+        [
+            InlineKeyboardButton("📦 Salvar Mídia Agrupada", callback_data="salvar_midia_agrupada"),
+        ],
+    ]
+    
+    if media_groups:
+        keyboard.append([
+            InlineKeyboardButton("📋 Ver Grupos de Mídias", callback_data="listar_grupos_midias")
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+
+async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
+    """Mostra detalhes de um grupo de mídias"""
+    group = db.get_media_group(group_id)
+    
+    if not group:
+        await query.edit_message_text("❌ Grupo de mídias não encontrado.", parse_mode='HTML')
+        return
+    
+    mensagem = f"📦 <b>{group['nome']}</b>\n\n"
+    mensagem += f"🆔 ID: {group_id}\n"
+    mensagem += f"📊 Mídias: {len(group['medias'])}\n\n"
+    
+    if group['medias']:
+        mensagem += "<b>Mídias no grupo:</b>\n"
+        for i, media in enumerate(group['medias'], 1):
+            tipo_emoji = "📸" if media['media_type'] == 'photo' else "🎥"
+            mensagem += f"{i}. {tipo_emoji} {media['media_type']}\n"
+    
+    # Verifica se tem template associado
+    template_info = ""
+    if group.get('template_id'):
+        template = db.get_template(group['template_id'])
+        if template:
+            template_info = f"\n📝 Template: ID {group['template_id']}"
+    else:
+        template_info = "\n📝 Template: ❌ Nenhum template associado"
+    
+    mensagem += template_info
+    
+    # Busca botões globais
+    global_buttons_info = ""
+    if group.get('canal_id'):
+        global_buttons = db.get_global_buttons(group['canal_id'])
+        if global_buttons:
+            global_buttons_info = f"\n🔘 Botões Globais: {len(global_buttons)} botão(ões)"
+        else:
+            global_buttons_info = "\n🔘 Botões Globais: ❌ Nenhum"
+    
+    mensagem += global_buttons_info
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("👁️ Preview", callback_data=f"preview_grupo_midia_{group_id}"),
+        ],
+    ]
+    
+    # Adiciona botão para associar template se não tiver
+    if not group.get('template_id'):
+        keyboard.append([
+            InlineKeyboardButton("📝 Associar Template", callback_data=f"associar_template_grupo_{group_id}"),
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton("🗑️ Deletar", callback_data=f"deletar_grupo_midia_{group_id}"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_medias")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+
+async def enviar_preview_grupo_midia(query, context, group_id: int):
+    """Envia preview do grupo de mídias com template e botões"""
+    # Busca o grupo de mídias
+    group = db.get_media_group(group_id)
+    
+    if not group:
+        await query.edit_message_text("❌ Grupo de mídias não encontrado.", parse_mode='HTML')
+        return
+    
+    if not group.get('medias'):
+        await query.edit_message_text("❌ Grupo de mídias está vazio.", parse_mode='HTML')
+        return
+    
+    # Busca template se houver
+    template = None
+    if group.get('template_id'):
+        template = db.get_template(group['template_id'])
+    
+    # Busca botões globais do canal
+    global_buttons = None
+    if group.get('canal_id'):
+        global_buttons = db.get_global_buttons(group['canal_id'])
+        if not global_buttons:
+            global_buttons = None
+    
+    # Envia mensagem de carregamento
+    await query.answer("📤 Enviando preview...")
+    await query.edit_message_text("📤 <b>Enviando preview...</b>", parse_mode='HTML')
+    
+    # Envia o preview
+    try:
+        user_id = query.from_user.id
+        success = await media_handler.send_media_group_with_template(
+            context=context,
+            chat_id=user_id,  # Envia para o próprio usuário como preview
+            media_group=group,
+            template=template,
+            global_buttons=global_buttons
+        )
+        
+        if success:
+            # Volta para os detalhes do grupo
+            keyboard = [
+                [
+                    InlineKeyboardButton("⬅️ Voltar", callback_data=f"ver_grupo_midia_{group_id}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "✅ <b>Preview enviado!</b>\n\n"
+                "Verifique a mensagem acima para ver como ficará o grupo de mídias com template e botões aplicados.",
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
+        else:
+            await query.edit_message_text(
+                "❌ Erro ao enviar preview. Verifique se o grupo tem mídias válidas.",
+                parse_mode='HTML'
+            )
+    except Exception as e:
+        logger.error(f"Erro ao enviar preview: {e}")
+        await query.edit_message_text(
+            f"❌ Erro ao enviar preview: {str(e)[:100]}",
+            parse_mode='HTML'
+        )
+
+async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando para finalizar criação de grupo de mídias"""
+    if not context.user_data.get('salvando_midia') or context.user_data.get('tipo_midia') != 'agrupada':
+        await update.message.reply_text("❌ Você não está criando um grupo de mídias.")
+        return
+    
+    medias_temp = context.user_data.get('medias_temporarias', [])
+    
+    if len(medias_temp) == 0:
+        await update.message.reply_text("❌ Nenhuma mídia foi adicionada ao grupo.")
+        return
+    
+    if len(medias_temp) > 10:
+        await update.message.reply_text("❌ Máximo de 10 mídias por grupo. Remova algumas mídias.")
+        return
+    
+    # Pede nome para o grupo
+    context.user_data['criando_grupo'] = True
+    context.user_data['etapa_grupo'] = 'nome'
+    
+    await update.message.reply_text(
+        "📦 <b>Finalizar Grupo</b>\n\n"
+        f"Você tem {len(medias_temp)} mídia(s) no grupo.\n\n"
+        "Envie o nome para este grupo de mídias:",
+        parse_mode='HTML'
+    )
+
 def main():
     """Função principal para iniciar o bot"""
     # Cria a aplicação
@@ -2499,8 +3027,13 @@ def main():
     
     # Adiciona handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("finalizar_grupo", finalizar_grupo))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Handler para mídias (fotos e vídeos)
+    # Nota: Documentos enviados como arquivo não são capturados automaticamente
+    # O usuário deve enviar fotos/vídeos diretamente (não como arquivo)
+    application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
     
     # Inicia o bot
     logger.info("Bot de vagas iniciado!")
