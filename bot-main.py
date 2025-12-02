@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -26,11 +27,48 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN não encontrado no arquivo .env")
 
+# ID do super admin (deve estar no arquivo .env)
+SUPER_ADMIN = os.getenv('SUPER_ADMIN')
+
+if not SUPER_ADMIN:
+    raise ValueError("SUPER_ADMIN não encontrado no arquivo .env")
+
+try:
+    SUPER_ADMIN_ID = int(SUPER_ADMIN)
+except ValueError:
+    raise ValueError("SUPER_ADMIN deve ser um número inteiro válido")
+
 # Inicializa banco de dados, parser e media handler
 db = Database()
 parser = MessageParser()
 media_handler = MediaHandler(db)
 
+def is_super_admin(user_id: int) -> bool:
+    """Verifica se o usuário é o super admin"""
+    return user_id == SUPER_ADMIN_ID
+
+def require_super_admin(func):
+    """Decorador que verifica se o usuário é super admin antes de executar a função"""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user_id = update.effective_user.id
+        
+        if not is_super_admin(user_id):
+            message_text = "❌ Você não tem permissão para usar este bot."
+            try:
+                if update.callback_query:
+                    await update.callback_query.answer(message_text, show_alert=True)
+                elif update.message:
+                    await update.message.reply_text(message_text)
+            except Exception as e:
+                logger.error(f"Erro ao enviar mensagem de permissão: {e}")
+            return
+        
+        return await func(update, context, *args, **kwargs)
+    
+    return wrapper
+
+@require_super_admin
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /start"""
     # Cancela qualquer fluxo de cadastro em andamento
@@ -93,6 +131,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
+@require_super_admin
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para processar callbacks dos botões inline"""
     query = update.callback_query
@@ -1528,6 +1567,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(mensagem, parse_mode='HTML')
     
 
+@require_super_admin
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para receber mídias (fotos, vídeos, documentos)"""
     if not context.user_data.get('salvando_midia', False):
@@ -1604,6 +1644,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ Erro ao salvar mídia.")
 
+@require_super_admin
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para mensagens de texto"""
     message_text = update.message.text
@@ -3120,6 +3161,7 @@ async def enviar_preview_grupo_midia(query, context, group_id: int):
             parse_mode='HTML'
         )
 
+@require_super_admin
 async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para finalizar criação de grupo de mídias"""
     if not context.user_data.get('salvando_midia') or context.user_data.get('tipo_midia') != 'agrupada':
