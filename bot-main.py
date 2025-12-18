@@ -1708,12 +1708,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, horario in enumerate(sorted(horarios), 1):
                 mensagem += f"{i}. {horario}\n"
             mensagem += f"\n💾 ID: {canal_id}\n\n"
-            mensagem += "📝 <b>Criar template de mensagem?</b>"
             
             keyboard = [
                 [
-                    InlineKeyboardButton("✅ Sim", callback_data=f"criar_template_{canal_id}"),
-                    InlineKeyboardButton("❌ Não", callback_data="voltar_start"),
+                    InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_start"),
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1950,10 +1948,15 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia']:
                 context.user_data.pop(key, None)
             
+            # Botão para voltar ao canal
+            keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Canal", callback_data=f"editar_canal_{canal_id}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
             await update.message.reply_text(
                 "✅ <b>Mídia salva com sucesso!</b>\n\n"
                 f"📦 Grupo criado: ID {group_id}\n"
                 f"📸 Tipo: {media_info['media_type']}",
+                reply_markup=reply_markup,
                 parse_mode='HTML'
             )
         else:
@@ -2037,47 +2040,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Verifica se está finalizando grupo de mídias
     if context.user_data.get('criando_grupo', False):
-        etapa = context.user_data.get('etapa_grupo')
-        
-        if etapa == 'nome':
-            nome_grupo = message_text.strip()
-            
-            if not nome_grupo:
-                await update.message.reply_text("❌ Nome não pode estar vazio.")
-                return
-            
-            medias_temp = context.user_data.get('medias_temporarias', [])
-            canal_id = context.user_data.get('canal_id_midia')
-            user_id = update.message.from_user.id
-            
-            if not medias_temp:
-                await update.message.reply_text("❌ Nenhuma mídia no grupo.")
-                return
-            
-            # Cria o grupo de mídias
-            group_id = db.create_media_group(
-                nome=nome_grupo,
-                user_id=user_id,
-                canal_id=canal_id
-            )
-            
-            # Adiciona todas as mídias ao grupo
-            for ordem, media_id in enumerate(medias_temp, start=1):
-                db.add_media_to_group(group_id, media_id, ordem=ordem)
-            
-            # Limpa contexto
-            for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 
-                       'medias_temporarias', 'criando_grupo', 'etapa_grupo']:
-                context.user_data.pop(key, None)
-            
-            await update.message.reply_text(
-                f"✅ <b>Grupo de mídias criado com sucesso!</b>\n\n"
-                f"📦 Nome: {nome_grupo}\n"
-                f"🆔 ID: {group_id}\n"
-                f"📊 Mídias: {len(medias_temp)}",
-                parse_mode='HTML'
-            )
-            return
+        # Esta parte não deve ser mais alcançada pois o nome é gerado automaticamente
+        # Mantendo apenas para limpeza de contexto caso algo dê errado
+        for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 
+                   'medias_temporarias', 'criando_grupo', 'etapa_grupo']:
+            context.user_data.pop(key, None)
+        return
+
     
     # Verifica se está criando um template
     if context.user_data.get('criando_template', False):
@@ -3567,14 +3536,40 @@ async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Máximo de 10 mídias por grupo. Remova algumas mídias.")
         return
     
-    # Pede nome para o grupo
-    context.user_data['criando_grupo'] = True
-    context.user_data['etapa_grupo'] = 'nome'
+    # Cria o grupo de mídias com nome temporário
+    user_id = update.message.from_user.id
+    canal_id = context.user_data.get('canal_id_midia')
     
+    # Cria com nome temporário
+    group_id = db.create_media_group(
+        nome="Grupo Temp",
+        user_id=user_id,
+        canal_id=canal_id
+    )
+    
+    # Atualiza o nome com o ID
+    novo_nome = f"Grupo {group_id}"
+    db.update_media_group(group_id, nome=novo_nome)
+    
+    # Adiciona todas as mídias ao grupo
+    for ordem, media_id in enumerate(medias_temp, start=1):
+        db.add_media_to_group(group_id, media_id, ordem=ordem)
+    
+    # Limpa contexto
+    for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 
+               'medias_temporarias', 'criando_grupo', 'etapa_grupo']:
+        context.user_data.pop(key, None)
+    
+    # Botão para voltar ao canal
+    keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Canal", callback_data=f"editar_canal_{canal_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "📦 <b>Finalizar Grupo</b>\n\n"
-        f"Você tem {len(medias_temp)} mídia(s) no grupo.\n\n"
-        "Envie o nome para este grupo de mídias:",
+        f"✅ <b>Grupo de mídias criado com sucesso!</b>\n\n"
+        f"📦 Nome: {novo_nome}\n"
+        f"🆔 ID: {group_id}\n"
+        f"📊 Mídias: {len(medias_temp)}",
+        reply_markup=reply_markup,
         parse_mode='HTML'
     )
 
