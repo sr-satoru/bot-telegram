@@ -2088,7 +2088,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data['waiting_for_link_choice'] = True
                 
                 keyboard = [
-                    [InlineKeyboardButton("🔗 Mesmo link para todos", callback_data="link_choice_same")],
+                    [InlineKeyboardButton("🔗 a todos", callback_data="link_choice_same")],
                     [InlineKeyboardButton("🔗 Links separados", callback_data="link_choice_separate")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2097,6 +2097,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Se for apenas 1 link, vai direto pedir o URL
                 response += f"\nEnvie o URL do link:"
                 context.user_data['waiting_for_link_choice'] = False
+                context.user_data['etapa'] = 'recebendo_link'
                 await update.message.reply_text(response, parse_mode='HTML')
             return
         
