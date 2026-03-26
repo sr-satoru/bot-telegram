@@ -50,7 +50,7 @@ async def mostrar_menu_medias(query, context):
     for group in media_groups:
         group_id = group['id']
         nome = group['nome']
-        num_medias = len(group.get('medias', []))
+        num_medias = group.get('media_count', 0)
         
         display = f"📦 {nome} ({num_medias} mídias)"
         keyboard.append([
@@ -203,12 +203,14 @@ async def handle_edit_media_callback(query, context, media_handler, db):
     data = query.data
     
     if data == "edit_medias":
+        for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 'count_batch', 'medias_temporarias']:
+            context.user_data.pop(key, None)
         await mostrar_menu_medias(query, context)
         return True
         
     elif data == "salvar_midia_unica":
         canal_id = context.user_data.get('editando', {}).get('canal_id')
-        context.user_data.update({'salvando_midia': True, 'tipo_midia': 'unica', 'canal_id_midia': canal_id})
+        context.user_data.update({'salvando_midia': True, 'tipo_midia': 'unica', 'canal_id_midia': canal_id, 'count_batch': 0})
         await query.edit_message_text("📸 <b>Mídia Única</b>\n\nEnvie uma foto ou vídeo.", 
                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancelar", callback_data="edit_medias")]]), 
                                     parse_mode='HTML')
@@ -307,13 +309,20 @@ async def handle_edit_media_input(update: Update, context: ContextTypes.DEFAULT_
         
     if tipo == 'unica':
         group_id = await create_media_group(
-            nome=f"Mídia Única - {datetime.now(BRASILIA_TZ).strftime('%d/%m/%Y %H:%M')}",
+            nome=f"Mídia Solo - {datetime.now(BRASILIA_TZ).strftime('%d/%m/%Y %H:%M')}",
             user_id=update.message.from_user.id,
             canal_id=canal_id
         )
         await add_media_to_group(group_id, media_id, ordem=1)
-        for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia']: context.user_data.pop(key, None)
-        await mostrar_menu_edicao(update.message, context, extra_text=f"✅ Mídia salva! ID: {group_id}")
+        
+        # Incrementa contador de lote para feedback
+        count = context.user_data.get('count_batch', 0) + 1
+        context.user_data['count_batch'] = count
+        
+        await update.message.reply_text(
+            f"✅ Mídia solo #{count} salva! Continue enviando ou clique no botão abaixo para finalizar.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔚 Finalizar e Voltar", callback_data="edit_medias")]])
+        )
     else:
         medias = context.user_data.get('medias_temporarias', [])
         if len(medias) >= 10:
