@@ -8,9 +8,8 @@ from modules.utils import is_super_admin
 
 logger = logging.getLogger(__name__)
 
-async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, super_admin_id: int):
+async def handle_admin_callback(query, context: ContextTypes.DEFAULT_TYPE, super_admin_id: int):
     """Handlers de callback para o painel de administração"""
-    query = update.callback_query
     data = query.data
     user_id = query.from_user.id
     
@@ -92,7 +91,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("✅ Admin removido com sucesso!", show_alert=True)
             # Reutiliza o handler para recarregar a lista
             query.data = "gerenciar_admins"
-            await handle_admin_callback(update, context, super_admin_id)
+            await handle_admin_callback(query, context, super_admin_id)
         else:
             await query.answer("❌ Erro ao remover admin.", show_alert=True)
         return True

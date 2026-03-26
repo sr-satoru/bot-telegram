@@ -3,10 +3,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from db_helpers import get_canal, delete_canal
 from modules.utils import is_super_admin
+from modules.ui import mostrar_menu_edicao
 
 logger = logging.getLogger(__name__)
 
-async def handle_deletar_canal_callback(query, context, mostrar_menu_edicao_callback):
+async def handle_deletar_canal_callback(query, context):
     """Handlers de callback para exclusão de canais"""
     data = query.data
     user_id = query.from_user.id

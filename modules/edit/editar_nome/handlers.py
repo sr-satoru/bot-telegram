@@ -26,36 +26,14 @@ async def handle_edit_nome_message(update: Update, context: ContextTypes.DEFAULT
     if etapa == 'editando_nome':
         message_text = update.message.text
         # Atualiza o nome
+        # Atualiza o nome e gera feedback
         dados['nome'] = message_text
         dados['changes_made'] = True
         del dados['etapa']
         
-        # Envia mensagem curta
-        msg = await update.message.reply_text(f"✅ Nome atualizado para: <b>{message_text}</b>", parse_mode='HTML')
-        
-        # Mostra menu de edição em nova mensagem
-        mensagem = f"🔧 <b>Menu de Edição</b>\n\n"
-        mensagem += f"📢 <b>Nome:</b> {dados['nome']}\n"
-        mensagem += f"🆔 <b>IDs:</b> {len(dados['ids'])} ID(s)\n"
-        mensagem += f"🕒 <b>Horários:</b> {len(dados['horarios'])} horário(s)\n\n"
-        mensagem += "Escolha o que deseja editar:"
-        
-        keyboard = [
-            [InlineKeyboardButton("📛 Editar Nome", callback_data="edit_nome")],
-            [InlineKeyboardButton("🆔 Gerenciar IDs", callback_data="edit_ids")],
-            [InlineKeyboardButton("🕒 Gerenciar Horários", callback_data="edit_horarios_menu")],
-        ]
-        
-        if dados.get('changes_made', False):
-            keyboard.append([InlineKeyboardButton("✅ Salvar Alterações", callback_data="edit_salvar")])
-        
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Voltar", callback_data="editar_canal"),
-            InlineKeyboardButton("✖️ Cancelar", callback_data="edit_cancelar"),
-        ])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await msg.edit_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        from modules.ui import mostrar_menu_edicao
+        success_text = f"✅ <b>Nome atualizado com sucesso!</b>\n\n"
+        await mostrar_menu_edicao(update.message, context, extra_text=success_text)
         return True
         
     return False

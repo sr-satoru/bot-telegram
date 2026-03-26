@@ -11,16 +11,7 @@ async def mostrar_menu_ids(query, context):
     if ids:
         mensagem += "<b>IDs configurados:</b>\n"
         for i, canal_id_str in enumerate(ids, 1):
-            try:
-                canal_id_int = int(canal_id_str)
-                try:
-                    chat = await context.bot.get_chat(canal_id_int)
-                    chat_title = chat.title or chat.username or f"Canal {canal_id_str}"
-                    mensagem += f"{i}. <code>{canal_id_str}</code> - {chat_title}\n"
-                except Exception:
-                    mensagem += f"{i}. <code>{canal_id_str}</code>\n"
-            except ValueError:
-                mensagem += f"{i}. <code>{canal_id_str}</code>\n"
+            mensagem += f"{i}. <code>{canal_id_str}</code>\n"
     else:
         mensagem += "❌ Nenhum ID configurado\n"
     
@@ -41,8 +32,13 @@ async def mostrar_menu_ids(query, context):
         InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar"),
     ])
     
+    from telegram import CallbackQuery
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    
+    if isinstance(query, CallbackQuery):
+        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await query.reply_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
 
 async def handle_edit_ids_callback(query, context):
     """Handlers de callback para gerenciamento de IDs"""
@@ -174,44 +170,15 @@ async def handle_edit_ids_message(update: Update, context: ContextTypes.DEFAULT_
                 dados['changes_made'] = True
                 del dados['etapa']
                 
-                # Envia mensagem e mostra menu de IDs
-                await update.message.reply_text(
+                # Envia mensagem inicial de sucesso
+                msg = await update.message.reply_text(
                     f"✅ ID <code>{telegram_id}</code> adicionado!\n"
                     f"📝 <b>Nome:</b> {chat_title}",
                     parse_mode='HTML'
                 )
                 
-                # Mostra menu de IDs usando um objeto query simulado ou chamando a função
-                # Para simplificar aqui, vamos apenas recriar a mensagem do menu ou 
-                # chamar o mostrar_menu_ids se tivéssemos um query.
-                # Como estamos em handle_message, o ideal é enviar uma NOVA mensagem com o menu.
-                
-                # Vamos simplificar enviando uma nova mensagem com o menu
-                # Mas para isso precisamos do objeto query que não temos aqui.
-                # Então vamos apenas informar o sucesso e o usuário clica no menu anterior ou volta.
-                # Na verdade, o código original tentava editar a mensagem anterior, mas em handle_message 
-                # ele enviava uma nova e depois editava e tal. 
-                # Vou manter a lógica original o mais fiel possível.
-                
-                # No bot-main original:
-                # msg = await update.message.reply_text(...)
-                # await msg.edit_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
-                
-                # Vou criar um helper interno ou apenas repetir o código do menu aqui.
-                
-                # Reutilizando a lógica do menu (repetida por brevidade ou extraída)
-                mensagem = "🆔 <b>Gerenciar IDs</b>\n\n"
-                mensagem += "<b>IDs configurados:</b>\n"
-                for i, cid in enumerate(ids, 1):
-                     mensagem += f"{i}. <code>{cid}</code>\n"
-                
-                keyboard = [
-                    [InlineKeyboardButton("➕ Adicionar ID", callback_data="edit_add_id")],
-                    [InlineKeyboardButton("🗑 Remover ID", callback_data="edit_remove_id")],
-                    [InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await update.message.reply_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+                # Mostra o menu de IDs na mesma mensagem (ou nova se preferir)
+                await mostrar_menu_ids(msg, context)
                 
             except Exception as e:
                 error_msg = str(e).lower()

@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -21,15 +22,28 @@ def is_super_admin(user_id: int) -> bool:
     """Verifica se o usuário é o super admin"""
     return user_id == SUPER_ADMIN_ID
 
+# Cache de admins (user_id: timestamp)
+_admin_cache = {}
+_cache_ttl = 300 # 5 minutos
+
 async def is_admin(user_id: int) -> bool:
-    """Verifica se o usuário é admin (super admin ou admin normal)"""
+    """Verifica se o usuário é admin (super admin ou admin normal) com cache"""
     if is_super_admin(user_id):
         return True
-    return await is_admin_db(user_id)
+    
+    now = datetime.now().timestamp()
+    if user_id in _admin_cache:
+        cached_val, ts = _admin_cache[user_id]
+        if now - ts < _cache_ttl:
+            return cached_val
+            
+    res = await is_admin_db(user_id)
+    _admin_cache[user_id] = (res, now)
+    return res
 
 async def is_admin_only(user_id: int) -> bool:
     """Verifica se o usuário é apenas admin (não super admin)"""
-    return await is_admin_db(user_id) and not is_super_admin(user_id)
+    return await is_admin(user_id) and not is_super_admin(user_id)
 
 def require_admin(func):
     """Decorador que verifica se o usuário é admin ou super admin antes de executar a função"""

@@ -5,10 +5,10 @@ from db_helpers import (
     get_template_with_link_ids, update_link, update_all_links, 
     get_link_info, save_template, save_inline_buttons, 
     get_inline_buttons, delete_inline_button, get_inline_button_info, 
-    get_global_buttons, save_global_buttons, delete_global_button,
-    get_inline_button_info as get_global_button_info,
-    update_media_group, get_canal
+    get_global_buttons, update_media_group, get_canal,
+    delete_template
 )
+from modules.buton_global.handlers import handle_global_button_callback, handle_global_button_message
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +258,7 @@ async def handle_edit_template_callback(query, context, parser):
         if deleted:
             await query.answer("✅ Template deletado!")
             # Volta para lista
+            query.data = "edit_templates"
             await handle_edit_template_callback(query, context, parser)
         else:
             await query.edit_message_text("❌ Erro ao deletar template.")
@@ -311,122 +312,8 @@ async def handle_edit_template_callback(query, context, parser):
         await query.edit_message_text(f"🔗 <b>Edição Global</b>\n\nEnvie o novo URL para todos os segmentos:", parse_mode='HTML')
         return True
 
-    elif data == "edit_global_buttons":
-        dados = context.user_data.get('editando', {})
-        canal_id = dados.get('canal_id')
-        if not canal_id: return True
-        btns = await get_global_buttons(canal_id)
-        msg = "🔘 <b>Botões Globais</b>\n\nEstes botões aparecem em todas as postagens do canal.\n\n"
-        keyboard = []
-        for b in btns:
-            keyboard.append([InlineKeyboardButton(f"✏️ {b['text']}", callback_data=f"edit_global_button_{b['id']}"),
-                            InlineKeyboardButton("🗑️", callback_data=f"deletar_global_button_{b['id']}")])
-        keyboard.append([InlineKeyboardButton("➕ Adicionar Botão", callback_data=f"adicionar_global_button_{canal_id}")])
-        keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")])
-        await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-        return True
-
-    elif data.startswith("adicionar_global_button_"):
-        canal_id = int(data.split("_")[-1])
-        context.user_data.update({'adicionando_global_button': True, 'global_button_canal_id': canal_id, 'global_button_etapa': 'texto'})
-        await query.edit_message_text("➕ <b>Novo Botão Global</b>\n\nEnvie o texto do botão:", parse_mode='HTML')
-        return True
-
-    elif data.startswith("edit_global_button_"):
-        bid = int(data.split("_")[-1])
-        # Aqui usamos o db_helpers para pegar info do botão global se existir, ou reusamos o de inline se for a mesma tabela
-        # No bot-main original ele usava get_global_buttons e filtrava. 
-        # Vou simplificar chamando a função de banco se houver, ou assumir o formato.
-        # Na verdade, vou usar o get_global_buttons e achar o ID.
-        canal_id = context.user_data['editando']['canal_id']
-        btns = await get_global_buttons(canal_id)
-        btn = next((b for b in btns if b['id'] == bid), None)
-        if not btn: return True
-        context.user_data.update({'editando_global_button': True, 'global_button_id': bid, 'global_button_canal_id': canal_id, 'global_button_etapa': 'texto'})
-        await query.edit_message_text(f"✏️ <b>Editar Botão Global</b>\n\nTexto: '{btn['text']}'\nEnvie o novo texto:", parse_mode='HTML')
-        return True
-
-    elif data.startswith("deletar_global_button_"):
-        bid = int(data.split("_")[-1])
-        if await delete_global_button(bid):
-            await query.answer("✅ Botão deletado!")
-            await handle_edit_template_callback(query, context, parser) # Refresh
-        return True
-
-    elif data == "cancelar_global_button":
-        for key in ['adicionando_global_button', 'editando_global_button']: context.user_data.pop(key, None)
-        await handle_edit_template_callback(query, context, parser)
-        return True
-
-    elif data.startswith("adicionar_inline_button_"):
-        template_id = int(data.split("_")[-1])
-        context.user_data['adicionando_inline_button'] = True
-        context.user_data['inline_button_template_id'] = template_id
-        context.user_data['inline_button_etapa'] = 'texto'
-        await query.edit_message_text("➕ <b>Adicionar Botão Inline</b>\n\nEnvie o texto do botão:", parse_mode='HTML')
-        return True
-
-    elif data.startswith("edit_inline_button_"):
-        button_id = int(data.split("_")[-1])
-        btn_info = await get_inline_button_info(button_id)
-        if not btn_info: return True
-        context.user_data['editando_inline_button'] = True
-        context.user_data['inline_button_id'] = button_id
-        context.user_data['inline_button_template_id'] = btn_info['template_id']
-        context.user_data['inline_button_etapa'] = 'texto'
-        await query.edit_message_text(f"✏️ <b>Editar Botão</b>\n\nTexto atual: '{btn_info['text']}'\nEnvie o novo texto:", parse_mode='HTML')
-        return True
-
-    elif data.startswith("deletar_inline_button_"):
-        button_id = int(data.split("_")[-1])
-        btn_info = await get_inline_button_info(button_id)
-        if not btn_info: return True
-        template_id = btn_info['template_id']
-        if await delete_inline_button(button_id):
-            await show_edit_panel(query, template_id, context, "✅ Botão inline deletado!")
-        return True
-
-    elif data.startswith("edit_link_"):
-        link_id = int(data.split("_")[-1])
-        link_info = await get_link_info(link_id)
-        if not link_info: return True
-        link_id_db, template_id, segmento, url_atual, ordem = link_info
-        context.user_data['editing_link_id'] = link_id
-        context.user_data['editing_template_id'] = template_id
-        context.user_data['editing_segmento'] = segmento
-        context.user_data['editing_ordem'] = ordem
-        await query.edit_message_text(f"✏️ <b>Editando segmento {ordem}</b>\n\nSegmento: '{segmento}'\nEnvie o novo URL:", parse_mode='HTML')
-        return True
-
-    elif data == "confirmar_salvar_estatico":
-        canal_id = context.user_data.get('canal_id_template')
-        parsed = context.user_data.get('pending_template')
-        if not canal_id or not parsed: return True
-        template_id = await save_template(canal_id=canal_id, template_mensagem=parsed['template_mensagem'], links=[])
-        await query.edit_message_text(f"✅ Template estático salvo (ID: {template_id})!", parse_mode='HTML')
-        # Limpa
-        for key in ['criando_template', 'etapa', 'pending_template']: context.user_data.pop(key, None)
-        return True
-
-    elif data.startswith("link_choice_"):
-        choice = data.replace("link_choice_", "")
-        canal_id = context.user_data.get('canal_id_template')
-        parsed = context.user_data.get('pending_template')
-        
-        if choice == "keep":
-            links = [(seg, url) for seg, url in zip(parsed['segmentos'], parsed['urls_originais'])]
-            tid = await save_template(canal_id, parsed['template_mensagem'], links)
-            await query.edit_message_text(f"✅ Template salvo com links originais (ID: {tid})!", parse_mode='HTML')
-            for key in ['criando_template', 'etapa', 'pending_template']: context.user_data.pop(key, None)
-        elif choice == "same":
-            context.user_data['use_same_link'] = True
-            context.user_data['etapa'] = 'recebendo_link'
-            await query.edit_message_text("🔗 Envie o link único para todos os segmentos:", parse_mode='HTML')
-        elif choice == "separate":
-            context.user_data['etapa'] = 'recebendo_link'
-            context.user_data['links_received'] = []
-            context.user_data['current_link_index'] = 0
-            await query.edit_message_text(f"🔗 Envie o link para o segmento '{parsed['segmentos'][0]}':", parse_mode='HTML')
+    # Botões Globais delegados para modules.buton_global
+    if await handle_global_button_callback(query, context):
         return True
 
     return False
@@ -542,37 +429,8 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
         await update.message.reply_text("✅ Todos os links atualizados!")
         return True
 
-    if user_data.get('adicionando_global_button'):
-        cid = user_data['global_button_canal_id']
-        if user_data['global_button_etapa'] == 'texto':
-            user_data['global_button_text'] = message_text.strip()
-            user_data['global_button_etapa'] = 'url'
-            await update.message.reply_text("✅ Texto salvo. Envie o URL:")
-        else:
-            url = message_text.strip()
-            btns = await get_global_buttons(cid)
-            btns_list = [(b['text'], b['url']) for b in btns]
-            btns_list.append((user_data['global_button_text'], url))
-            await save_global_buttons(cid, btns_list)
-            for key in ['adicionando_global_button', 'global_button_canal_id', 'global_button_etapa', 'global_button_text']: user_data.pop(key, None)
-            await update.message.reply_text("✅ Botão global adicionado!")
-        return True
-
-    if user_data.get('editando_global_button'):
-        bid = user_data['global_button_id']
-        cid = user_data['global_button_canal_id']
-        if user_data['global_button_etapa'] == 'texto':
-            user_data['global_button_new_text'] = message_text.strip()
-            user_data['global_button_etapa'] = 'url'
-            await update.message.reply_text("✅ Novo texto salvo. Envie o novo URL:")
-        else:
-             url = message_text.strip()
-             btns = await get_global_buttons(cid)
-             btns_list = [(b['text'], b['url']) for b in btns if b['id'] != bid]
-             btns_list.append((user_data['global_button_new_text'], url))
-             await save_global_buttons(cid, btns_list)
-             for key in ['editando_global_button', 'global_button_id', 'global_button_canal_id', 'global_button_etapa', 'global_button_new_text']: user_data.pop(key, None)
-             await update.message.reply_text("✅ Botão global atualizado!")
+    # Botões Globais delegados ao módulo modules.buton_global
+    if await handle_global_button_message(update, context):
         return True
 
     if 'mudando_link_bot_canal' in user_data:
