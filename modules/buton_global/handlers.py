@@ -1,10 +1,10 @@
 from .ui import (
     mostrar_menu_botoes, mostrar_prompt_texto_botao, 
     mostrar_prompt_url_botao, mostrar_confirmacao_delecao, 
-    notificar_sucesso
+    notificar_sucesso, mostrar_menu_edicao_botao
 )
 from .utils import (
-    get_any_buttons, save_any_buttons, delete_any_button, get_any_button_info
+    get_any_buttons, save_any_buttons, delete_any_button, get_any_button_info, update_any_button
 )
 from db_helpers import toggle_inline_button_status
 
@@ -31,6 +31,10 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
                 parent_id = context.user_data.get('editing_template_id')
                 
         if not parent_id: return True
+        # Limpa estados de edição ao voltar para a lista
+        for key in ['adicionando_button', 'editando_button', 'button_id', 'button_etapa', 'button_field']: 
+            context.user_data.pop(key, None)
+            
         await mostrar_menu_botoes(query, parent_id, owner_type)
         return True
         
@@ -40,20 +44,42 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
         context.user_data['button_parent_id'] = parent_id
         context.user_data['button_owner_type'] = owner_type
         context.user_data['button_etapa'] = 'texto'
-        await mostrar_prompt_texto_botao(query, is_edit=False)
+        await mostrar_prompt_texto_botao(query, is_edit=False, prefix=prefix)
         return True
         
     elif data.startswith(f"{prefix}_edit_"):
         button_id = int(data.split("_")[-1])
         btn_info = await get_any_button_info(button_id, owner_type)
         if not btn_info: return True
-            
+        
+        parent_id = btn_info.get('canal_id') or btn_info.get('template_id')
+        await mostrar_menu_edicao_botao(query, button_id, parent_id, owner_type)
+        return True
+
+    elif data.startswith(f"{prefix}_mt_"):
+        button_id = int(data.split("_")[-1])
+        btn_info = await get_any_button_info(button_id, owner_type)
+        if not btn_info: return True
+        
         context.user_data['editando_button'] = True
         context.user_data['button_id'] = button_id
-        context.user_data['button_parent_id'] = btn_info.get('canal_id') or btn_info.get('template_id')
         context.user_data['button_owner_type'] = owner_type
         context.user_data['button_etapa'] = 'texto'
-        await mostrar_prompt_texto_botao(query, is_edit=True, text_atual=btn_info['text'], url_atual=btn_info['url'])
+        context.user_data['button_field'] = 'text'
+        await mostrar_prompt_texto_botao(query, is_edit=True, text_atual=btn_info['text'], prefix=prefix)
+        return True
+
+    elif data.startswith(f"{prefix}_mu_"):
+        button_id = int(data.split("_")[-1])
+        btn_info = await get_any_button_info(button_id, owner_type)
+        if not btn_info: return True
+        
+        context.user_data['editando_button'] = True
+        context.user_data['button_id'] = button_id
+        context.user_data['button_owner_type'] = owner_type
+        context.user_data['button_etapa'] = 'url'
+        context.user_data['button_field'] = 'url'
+        await mostrar_prompt_url_botao(query, btn_info['text'], prefix=prefix, context=context)
         return True
         
     elif data.startswith(f"{prefix}_del_"):
@@ -80,18 +106,32 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
             btn_info = await get_any_button_info(button_id, owner_type)
             parent_id = btn_info.get('template_id')
             label = "ativado" if new_status == "ATIVO" else "desativado"
-            await mostrar_menu_botoes(query, parent_id, owner_type, f"✅ Botão {label}!")
+            # Se já estávamos no menu de edição, volta para ele com o status novo
+            await mostrar_menu_edicao_botao(query, button_id, parent_id, owner_type, f"✅ Botão {label}!")
         return True
 
-    elif data.startswith("cancelar_delecao_"):
-        # Extrai o owner_type do callback data se possível, ou usa o padrão
-        if owner_type == 'canal':
-            edit_data = context.user_data.get('editando', {})
-            parent_id = edit_data.get('canal_id') or edit_data.get('id')
+    elif data.startswith(f"{prefix}_cancel_prompt") or data == "cancelar_delecao_":
+        # Extrai IDs se possível
+        btn_id = context.user_data.get('button_id')
+        parent_id = context.user_data.get('button_parent_id')
+        
+        if not parent_id:
+            if owner_type == 'canal':
+                edit_data = context.user_data.get('editando', {})
+                parent_id = edit_data.get('canal_id') or edit_data.get('id')
+            else:
+                parent_id = context.user_data.get('editing_template_id')
+        
+        # Limpa estados
+        for key in ['adicionando_button', 'editando_button', 'button_id', 'button_etapa', 'button_field']: 
+            context.user_data.pop(key, None)
+
+        if btn_id:
+            # Se estava editando um botão, volta para o menu dele
+            await mostrar_menu_edicao_botao(query, btn_id, parent_id, owner_type)
         else:
-            parent_id = context.user_data.get('editing_template_id')
-            
-        await mostrar_menu_botoes(query, parent_id, owner_type)
+            # Se estava adicionando ou deletando, volta para a lista
+            await mostrar_menu_botoes(query, parent_id, owner_type)
         return True
         
     return False
@@ -110,15 +150,18 @@ async def handle_any_button_message(update, context):
     text = message.text
     if text == "/cancelar":
         # Recupera dados para voltar ao menu
+        btn_id = user_data.get('button_id')
         parent_id = user_data.get('button_parent_id')
         owner_type = user_data.get('button_owner_type', 'canal')
         
         # Limpa contexto genérico
         params = ['adicionando_button', 'editando_button', 'button_parent_id', 
-                  'button_owner_type', 'button_etapa', 'button_text', 'button_id']
+                  'button_owner_type', 'button_etapa', 'button_text', 'button_id', 'button_field']
         for key in params: user_data.pop(key, None)
         
-        if parent_id:
+        if btn_id and parent_id:
+            await mostrar_menu_edicao_botao(message, btn_id, parent_id, owner_type, texto_extra="❌ Operação cancelada.")
+        elif parent_id:
             await mostrar_menu_botoes(message, parent_id, owner_type, texto_extra="❌ Operação cancelada.")
         else:
             await notificar_sucesso(message, "cancelado")
@@ -133,45 +176,60 @@ async def handle_any_button_message(update, context):
         parent_id = user_data.get('button_parent_id')
         owner_type = user_data.get('button_owner_type', 'canal')
         
+        # --- FLUXO DE EDIÇÃO ---
+        if is_editing:
+            button_id = user_data.get('button_id')
+            field = user_data.get('button_field')
+            
+            if field == 'text':
+                await update_any_button(button_id, {"text": text}, owner_type)
+                user_data.pop('button_etapa', None)
+                user_data.pop('button_field', None)
+                user_data.pop('editando_button', None)
+                await mostrar_menu_edicao_botao(message, button_id, parent_id, owner_type, "✅ Nome do botão atualizado!")
+                return True
+                
+            elif field == 'url':
+                if not text.startswith(('http', 'https')):
+                    await message.reply_text("❌ URL inválida. Envie um link começando com http:// ou https://")
+                    return True
+                await update_any_button(button_id, {"url": text}, owner_type)
+                user_data.pop('button_etapa', None)
+                user_data.pop('button_field', None)
+                user_data.pop('editando_button', None)
+                await mostrar_menu_edicao_botao(message, button_id, parent_id, owner_type, "✅ Link do botão atualizado!")
+                return True
+        
+        # --- FLUXO DE ADIÇÃO (EXISTENTE) ---
         if etapa == 'texto':
             user_data['button_text'] = text
             user_data['button_etapa'] = 'url'
-            await mostrar_prompt_url_botao(message, text)
+            prefix = "global_button_tg" if owner_type == 'canal' else "fix_button_tg"
+            await mostrar_prompt_url_botao(message, text, prefix=prefix, context=context)
             return True
             
         elif etapa == 'url':
-            url = text
+            if not text.startswith(('http', 'https')):
+                await message.reply_text("❌ URL inválida. Envie um link começando com http:// ou https://")
+                return True
+                
             button_text = user_data.get('button_text')
+            url = text
             
-            # Busca lista atual
+            # Busca lista atual para adicionar à ela
             current_buttons = await get_any_buttons(parent_id, owner_type)
-            
-            if is_adding:
-                updated_list = [(b['text'], b['url']) for b in current_buttons]
-                updated_list.append((button_text, url))
-                msg_type = "adicionado"
-            else:
-                bid = user_data.get('button_id')
-                updated_list = []
-                for b in current_buttons:
-                    if b['id'] == bid:
-                        updated_list.append((button_text, url))
-                    else:
-                        updated_list.append((b['text'], b['url']))
-                msg_type = "editado"
+            updated_list = [(b['text'], b['url']) for b in current_buttons]
+            updated_list.append((button_text, url))
             
             await save_any_buttons(parent_id, updated_list, owner_type)
             
-            # Limpa contexto
-            params = ['adicionando_button', 'editando_button', 'button_parent_id', 
-                      'button_owner_type', 'button_etapa', 'button_text', 'button_id']
+            # Limpa tudo
+            params = ['adicionando_button', 'button_parent_id', 'button_owner_type', 'button_etapa', 'button_text']
             for key in params: user_data.pop(key, None)
             
-            # Mostra o menu de volta (passando a mensagem para usar reply_text)
-            sucesso_msg = f"✅ Botão {msg_type} com sucesso!"
-            await mostrar_menu_botoes(message, parent_id, owner_type, texto_extra=sucesso_msg)
+            await mostrar_menu_botoes(message, parent_id, owner_type, texto_extra="✅ Botão adicionado!")
             return True
-            
+        
     return False
 
 # Retrocompatibilidade

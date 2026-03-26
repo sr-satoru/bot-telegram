@@ -249,6 +249,18 @@ async def get_inline_button_info(button_id: int) -> Optional[Dict]:
         return None
     return {"id": b.id, "template_id": b.template_id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status}
 
+async def update_inline_button(button_id: int, data: Dict) -> bool:
+    """Atualiza campos de um botão inline (text, url)"""
+    update_data = {}
+    if "text" in data: update_data["button_text"] = data["text"]
+    if "url" in data: update_data["button_url"] = data["url"]
+    
+    result = await prisma.templateinlinebutton.update_many(
+        where={"id": button_id},
+        data=update_data
+    )
+    return result > 0
+
 async def toggle_inline_button_status(button_id: int) -> Optional[str]:
     """Alterna o status entre ATIVO e INATIVO. Retorna novo status."""
     b = await prisma.templateinlinebutton.find_unique(where={"id": button_id})
@@ -289,6 +301,18 @@ async def get_global_button_info(button_id: int) -> Optional[Dict]:
     if not b:
         return None
     return {"id": b.id, "canal_id": b.canal_id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem}
+
+async def update_global_button(button_id: int, data: Dict) -> bool:
+    """Atualiza campos de um botão global (text, url)"""
+    update_data = {}
+    if "text" in data: update_data["button_text"] = data["text"]
+    if "url" in data: update_data["button_url"] = data["url"]
+    
+    result = await prisma.canalglobalbutton.update_many(
+        where={"id": button_id},
+        data=update_data
+    )
+    return result > 0
 
 
 # ──────────────────────────────────────────────
