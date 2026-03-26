@@ -20,7 +20,19 @@ except ImportError:
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import Conflict
-from database import Database
+from db import prisma
+from db_helpers import (
+    is_admin_db, add_admin, remove_admin, get_all_admins, get_admin,
+    save_canal, get_canal, get_all_canais, delete_canal, update_canal,
+    save_template, get_template, get_templates_by_canal, delete_template,
+    get_template_with_link_ids, update_link, update_all_links, get_link_info,
+    save_inline_buttons, get_inline_buttons, delete_inline_button,
+    get_inline_button_info,
+    get_global_buttons, save_global_buttons, delete_global_button,
+    get_global_button_info,
+    save_media, create_media_group, add_media_to_group, get_media_group,
+    get_media_groups_by_user, delete_media_group, update_media_group,
+)
 from parser import MessageParser
 from media_handler import MediaHandler
 from scheduler import MediaScheduler
@@ -53,24 +65,22 @@ try:
 except ValueError:
     raise ValueError("SUPER_ADMIN deve ser um número inteiro válido")
 
-# Inicializa banco de dados, parser e media handler
-db = Database()
 parser = MessageParser()
-media_handler = MediaHandler(db)
+media_handler = MediaHandler()
 
 def is_super_admin(user_id: int) -> bool:
     """Verifica se o usuário é o super admin"""
     return user_id == SUPER_ADMIN_ID
 
-def is_admin(user_id: int) -> bool:
+async def is_admin(user_id: int) -> bool:
     """Verifica se o usuário é admin (super admin ou admin normal)"""
     if is_super_admin(user_id):
         return True
-    return db.is_admin(user_id)
+    return await is_admin_db(user_id)
 
-def is_admin_only(user_id: int) -> bool:
+async def is_admin_only(user_id: int) -> bool:
     """Verifica se o usuário é apenas admin (não super admin)"""
-    return db.is_admin(user_id) and not is_super_admin(user_id)
+    return await is_admin_db(user_id) and not is_super_admin(user_id)
 
 def require_admin(func):
     """Decorador que verifica se o usuário é admin ou super admin antes de executar a função"""
@@ -78,7 +88,7 @@ def require_admin(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
         
-        if not is_admin(user_id):
+        if not await is_admin(user_id):
             message_text = "❌ Você não tem permissão para usar este bot. Fale com o @sr_satoru_Gojo para liberrar seu acesso "
             try:
                 if update.callback_query:
@@ -210,7 +220,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "editar_canal":
         # Lista os canais do usuário para editar
         user_id = query.from_user.id
-        canais = db.get_all_canais(user_id=user_id)
+        canais = await get_all_canais(user_id=user_id)
         
         if not canais:
             await query.edit_message_text(
@@ -273,7 +283,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         canal_id = int(query.data.split("_")[-1])
         
         # Verifica se o canal pertence ao admin (isolamento)
-        canal = db.get_canal(canal_id)
+        canal = await get_canal(canal_id)
         if not canal:
             await query.answer("❌ Canal não encontrado.", show_alert=True)
             return
@@ -300,7 +310,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         canal_id = int(query.data.split("_")[-1])
         user_id = query.from_user.id
         
-        canal = db.get_canal(canal_id)
+        canal = await get_canal(canal_id)
         
         if not canal:
             await query.edit_message_text(
@@ -354,7 +364,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
             return
         
-        global_buttons = db.get_global_buttons(canal_id)
+        global_buttons = await get_global_buttons(canal_id)
         
         mensagem = "🔘 <b>Botões Globais</b>\n\n"
         mensagem += "Botões globais são aplicados a TODOS os templates do canal.\n\n"
@@ -423,17 +433,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         button_id = int(query.data.split("_")[-1])
         
         # Busca informações do botão
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT canal_id, button_text, button_url, ordem FROM canal_global_buttons WHERE id = ?', (button_id,))
-        result = cursor.fetchone()
-        conn.close()
+        btn_info = await get_global_button_info(button_id)
         
-        if not result:
+        if not btn_info:
             await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
             return
         
-        canal_id, button_text, button_url, ordem = result
+        canal_id, button_text, button_url, ordem = btn_info['canal_id'], btn_info['text'], btn_info['url'], btn_info['ordem']
         
         context.user_data['editando_global_button'] = True
         context.user_data['global_button_id'] = button_id
@@ -464,23 +470,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         button_id = int(query.data.split("_")[-1])
         
         # Busca canal_id antes de deletar
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT canal_id FROM canal_global_buttons WHERE id = ?', (button_id,))
-        result = cursor.fetchone()
-        conn.close()
+        btn_info = await get_global_button_info(button_id)
         
-        if not result:
+        if not btn_info:
             await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
             return
         
-        canal_id = result[0]
+        canal_id = btn_info['canal_id']
         
-        deleted = db.delete_global_button(button_id)
+        deleted = await delete_global_button(button_id)
         
         if deleted:
             # Volta para o menu de botões globais
-            global_buttons = db.get_global_buttons(canal_id)
+            global_buttons = await get_global_buttons(canal_id)
             
             mensagem = "✅ <b>Botão global deletado!</b>\n\n"
             mensagem += "🔘 <b>Botões Globais</b>\n\n"
@@ -534,7 +536,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         try:
-            db.update_canal(
+            await update_canal(
                 canal_id=dados['canal_id'],
                 nome=dados.get('nome'),
                 ids_canal=dados.get('ids'),
@@ -579,7 +581,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nome_canal = dados.get('nome', 'Canal')
         
         # Verifica permissão
-        canal = db.get_canal(canal_id)
+        canal = await get_canal(canal_id)
         if not canal:
             await query.answer("❌ Canal não encontrado.", show_alert=True)
             return
@@ -617,7 +619,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         canal_id = int(query.data.split("_")[-1])
         
         # Verifica permissão novamente
-        canal = db.get_canal(canal_id)
+        canal = await get_canal(canal_id)
         if not canal:
             await query.answer("❌ Canal não encontrado.", show_alert=True)
             return
@@ -629,7 +631,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nome_canal = canal['nome']
         
         # Deleta o canal
-        deleted = db.delete_canal(canal_id)
+        deleted = await delete_canal(canal_id)
         
         if deleted:
             # Limpa contexto de edição
@@ -701,7 +703,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
             return
         
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         if not templates:
             keyboard = [
@@ -750,7 +752,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("preview_template_"):
         # Mostra preview do template formatado
         template_id = int(query.data.split("_")[-1])
-        template = db.get_template(template_id)
+        template = await get_template(template_id)
         
         if not template:
             await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
@@ -764,7 +766,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Busca botões globais do canal
         global_buttons = []
         if canal_id:
-            global_buttons = db.get_global_buttons(canal_id)
+            global_buttons = await get_global_buttons(canal_id)
         
         # Converte para formato de tuplas (segmento, link_url)
         links_tuples = [(link['segmento'], link['link']) for link in links]
@@ -836,7 +838,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("deletar_template_"):
         # Confirmação para deletar template
         template_id = int(query.data.split("_")[-1])
-        template = db.get_template(template_id)
+        template = await get_template(template_id)
         
         if not template:
             await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
@@ -864,7 +866,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Deleta o template
         template_id = int(query.data.split("_")[-1])
         
-        deleted = db.delete_template(template_id)
+        deleted = await delete_template(template_id)
         
         if deleted:
             # Volta para a lista de templates
@@ -872,7 +874,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             canal_id = dados.get('canal_id')
             
             if canal_id:
-                templates = db.get_templates_by_canal(canal_id)
+                templates = await get_templates_by_canal(canal_id)
                 
                 mensagem = f"✅ <b>Template deletado!</b>\n\n"
                 mensagem += f"📝 <b>Gerenciar Templates</b>\n\n"
@@ -916,7 +918,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         canal_id = int(query.data.split("_")[-1])
         
         # Verifica quantos templates existem
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         num_templates = len(templates)
         
         mensagem = "🔄 <b>Mudar Link Geral do Canal</b>\n\n"
@@ -939,7 +941,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("mudar_link_global_canal_"):
         # Substitui TODOS os links de TODOS os templates do canal
         canal_id = int(query.data.split("_")[-1])
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         if not templates:
             await query.edit_message_text("❌ Nenhum template encontrado.", parse_mode='HTML')
@@ -961,7 +963,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("mudar_link_bot_canal_"):
         # Substitui apenas links de bot do Telegram de TODOS os templates
         canal_id = int(query.data.split("_")[-1])
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         if not templates:
             await query.edit_message_text("❌ Nenhum template encontrado.", parse_mode='HTML')
@@ -985,7 +987,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("mudar_link_externo_canal_"):
         # Substitui apenas links externos (não Telegram) de TODOS os templates
         canal_id = int(query.data.split("_")[-1])
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         if not templates:
             await query.edit_message_text("❌ Nenhum template encontrado.", parse_mode='HTML')
@@ -1024,7 +1026,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if canal_id:
             # Volta para o menu de botões globais
-            global_buttons = db.get_global_buttons(canal_id)
+            global_buttons = await get_global_buttons(canal_id)
             
             mensagem = "❌ <b>Operação cancelada</b>\n\n"
             mensagem += "🔘 <b>Botões Globais</b>\n\n"
@@ -1070,7 +1072,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("edit_all_"):
         # Edita todos os links do template
         template_id = int(query.data.split("_")[-1])
-        template = db.get_template_with_link_ids(template_id)
+        template = await get_template_with_link_ids(template_id)
         
         if not template:
             await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
@@ -1113,17 +1115,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         button_id = int(query.data.split("_")[-1])
         
         # Busca informações do botão
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT template_id, button_text, button_url, ordem FROM template_inline_buttons WHERE id = ?', (button_id,))
-        result = cursor.fetchone()
-        conn.close()
+        btn_info = await get_inline_button_info(button_id)
         
-        if not result:
+        if not btn_info:
             await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
             return
         
-        template_id, button_text, button_url, ordem = result
+        template_id, button_text, button_url, ordem = btn_info['template_id'], btn_info['text'], btn_info['url'], btn_info['ordem']
         
         context.user_data['editando_inline_button'] = True
         context.user_data['inline_button_id'] = button_id
@@ -1144,19 +1142,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         button_id = int(query.data.split("_")[-1])
         
         # Busca template_id antes de deletar
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT template_id FROM template_inline_buttons WHERE id = ?', (button_id,))
-        result = cursor.fetchone()
-        conn.close()
+        btn_info = await get_inline_button_info(button_id)
         
-        if not result:
+        if not btn_info:
             await query.edit_message_text("❌ Botão não encontrado.", parse_mode='HTML')
             return
         
-        template_id = result[0]
+        template_id = btn_info['template_id']
         
-        deleted = db.delete_inline_button(button_id)
+        deleted = await delete_inline_button(button_id)
         
         if deleted:
             await show_edit_panel(query, template_id, context, "✅ Botão inline deletado!")
@@ -1166,7 +1160,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("edit_link_"):
         # Edita um link específico
         link_id = int(query.data.split("_")[-1])
-        link_info = db.get_link_info(link_id)
+        link_info = await get_link_info(link_id)
         
         if not link_info:
             await query.edit_message_text("❌ Link não encontrado.", parse_mode='HTML')
@@ -1276,7 +1270,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Deleta grupo de mídias
         group_id = int(query.data.split("_")[-1])
         
-        deleted = db.delete_media_group(group_id)
+        deleted = await delete_media_group(group_id)
         
         if deleted:
             await query.edit_message_text(
@@ -1307,7 +1301,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
             return
         
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         if not templates:
             await query.edit_message_text(
@@ -1344,7 +1338,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         template_id = int(parts[-1])
         
         # Atualiza o grupo de mídias
-        db.update_media_group(group_id, template_id=template_id)
+        await update_media_group(group_id, template_id=template_id)
         
         await query.edit_message_text(
             f"✅ Template associado com sucesso!",
@@ -1359,7 +1353,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         group_id = int(query.data.split("_")[-1])
         
         # Atualiza o grupo removendo o template
-        success = db.update_media_group(group_id, remove_template=True)
+        success = await update_media_group(group_id, remove_template=True)
         
         if success:
             await query.answer("✅ Template removido!")
@@ -1378,7 +1372,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Busca templates do canal
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         if not templates:
             await query.edit_message_text(
@@ -1392,7 +1386,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(templates) == 1:
             template_id = templates[0]['id']
             # Busca grupos sem template
-            media_groups = db.get_media_groups_by_user(user_id, canal_id)
+            media_groups = await get_media_groups_by_user(user_id, canal_id)
             grupos_sem_template = [g for g in media_groups if not g.get('template_id')]
             
             if not grupos_sem_template:
@@ -1404,7 +1398,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Associa template a todos os grupos sem template
             for group in grupos_sem_template:
-                db.update_media_group(group['id'], template_id=template_id)
+                await update_media_group(group['id'], template_id=template_id)
             
             await query.edit_message_text(
                 f"✅ Template associado automaticamente a {len(grupos_sem_template)} grupo(s)!",
@@ -1441,7 +1435,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = query.from_user.id
         
         # Busca grupos sem template
-        media_groups = db.get_media_groups_by_user(user_id, canal_id)
+        media_groups = await get_media_groups_by_user(user_id, canal_id)
         grupos_sem_template = [g for g in media_groups if not g.get('template_id')]
         
         if not grupos_sem_template:
@@ -1453,7 +1447,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Associa template a todos os grupos sem template
         for group in grupos_sem_template:
-            db.update_media_group(group['id'], template_id=template_id)
+            await update_media_group(group['id'], template_id=template_id)
         
         await query.edit_message_text(
             f"✅ Template associado automaticamente a {len(grupos_sem_template)} grupo(s)!",
@@ -1468,7 +1462,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         canal_id = dados.get('canal_id')
         user_id = query.from_user.id
         
-        media_groups = db.get_media_groups_by_user(user_id, canal_id)
+        media_groups = await get_media_groups_by_user(user_id, canal_id)
         
         if not media_groups:
             await query.edit_message_text(
@@ -1804,7 +1798,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Salva no banco de dados
         try:
-            canal_id = db.save_canal(
+            canal_id = await save_canal(
                 nome=nome_canal,
                 ids_canal=ids_canal,
                 horarios=horarios,
@@ -1851,7 +1845,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Apenas o super admin pode gerenciar admins.", show_alert=True)
             return
         
-        admins = db.get_all_admins()
+        admins = await get_all_admins()
         
         mensagem = "👥 <b>Gerenciar Admins</b>\n\n"
         
@@ -1893,7 +1887,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Apenas o super admin pode remover admins.", show_alert=True)
             return
         
-        admins = db.get_all_admins()
+        admins = await get_all_admins()
         
         if not admins:
             await query.answer("❌ Nenhum admin cadastrado.", show_alert=True)
@@ -1930,7 +1924,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Não é possível remover o super admin.", show_alert=True)
             return
         
-        removed = db.remove_admin(admin_id)
+        removed = await remove_admin(admin_id)
         
         if removed:
             await query.answer("✅ Admin removido com sucesso!", show_alert=True)
@@ -1945,13 +1939,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Apenas o super admin pode acessar o painel de controle.", show_alert=True)
             return
         
-        admins = db.get_all_admins()
+        admins = await get_all_admins()
         
         mensagem = "📊 <b>Painel de Controle</b>\n\n"
         mensagem += "📈 <b>Visão Geral</b>\n\n"
         
         # Estatísticas gerais
-        all_canais = db.get_all_canais()
+        all_canais = await get_all_canais()
         total_canais = len(all_canais)
         
         mensagem += f"📢 Total de Canais: {total_canais}\n"
@@ -1963,7 +1957,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for admin in admins:
                 admin_id = admin['user_id']
                 username = admin['username'] or f"ID {admin_id}"
-                admin_canais = db.get_all_canais(user_id=admin_id)
+                admin_canais = await get_all_canais(user_id=admin_id)
                 mensagem += f"👤 @{username} ({admin_id}): {len(admin_canais)} canal(is)\n"
         
         keyboard = []
@@ -1990,14 +1984,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         admin_id = int(query.data.split("_")[-1])
-        admin_info = db.get_admin(admin_id)
+        admin_info = await get_admin(admin_id)
         
         if not admin_info:
             await query.answer("❌ Admin não encontrado.", show_alert=True)
             return
         
         username = admin_info['username'] or f"ID {admin_id}"
-        canais = db.get_all_canais(user_id=admin_id)
+        canais = await get_all_canais(user_id=admin_id)
         
         mensagem = f"📊 <b>Canais de @{username}</b>\n\n"
         
@@ -2042,33 +2036,30 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if tipo_midia == 'unica':
-        # Salva mídia única
-        media_id = media_handler.save_media_from_message(update)
+        # Salva mídia única — cada mídia recebida vira um grupo individual
+        media_id = await media_handler.save_media_from_message(update)
         
         if media_id:
-            # Cria um grupo de mídias com apenas uma mídia
             user_id = update.message.from_user.id
-            group_id = db.create_media_group(
+            group_id = await create_media_group(
                 nome=f"Mídia Única - {datetime.now(BRASILIA_TZ).strftime('%d/%m/%Y %H:%M')}",
                 user_id=user_id,
                 canal_id=canal_id
             )
             
-            db.add_media_to_group(group_id, media_id, ordem=1)
+            await add_media_to_group(group_id, media_id, ordem=1)
             
-            # Limpa contexto
-            for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia']:
-                context.user_data.pop(key, None)
+            # Não limpa o contexto aqui — permite capturar as próximas mídias
+            # do mesmo envio em grupo (media_group_id do Telegram)
+            # O usuário pode enviar várias de uma vez e todas serão salvas
             
-            # Botão para voltar ao canal
-            keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Canal", callback_data=f"editar_canal_{canal_id}")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
             await update.message.reply_text(
-                "✅ <b>Mídia salva com sucesso!</b>\n\n"
+                "✅ <b>Mídia salva!</b>\n\n"
                 f"📦 Grupo criado: ID {group_id}\n"
-                f"📸 Tipo: {media_info['media_type']}",
-                reply_markup=reply_markup,
+                f"📸 Tipo: {media_info['media_type']}\n\n"
+                "<i>Se enviou mais mídias, cada uma será salva separadamente.</i>\n"
+                "Clique em ⬅️ Voltar quando terminar.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Canal", callback_data=f"editar_canal_{canal_id}")]]),
                 parse_mode='HTML'
             )
         else:
@@ -2076,7 +2067,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif tipo_midia == 'agrupada':
         # Adiciona mídia ao grupo temporário
-        media_id = media_handler.save_media_from_message(update)
+        media_id = await media_handler.save_media_from_message(update)
         
         if media_id:
             medias_temp = context.user_data.get('medias_temporarias', [])
@@ -2129,7 +2120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 username = None
             
             # Adiciona admin
-            success = db.add_admin(admin_id, username)
+            success = await add_admin(admin_id, username)
             
             if success:
                 context.user_data.pop('adicionando_admin', None)
@@ -2235,7 +2226,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 links_list = [(seg, link_url) for seg in segmentos]
                 
                 # Salva o template
-                template_id = db.save_template(
+                template_id = await save_template(
                     canal_id=canal_id,
                     template_mensagem=template_data['template_mensagem'],
                     links=links_list
@@ -2291,7 +2282,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
             else:
                 # Todos os links foram recebidos, salva o template
-                template_id = db.save_template(
+                template_id = await save_template(
                     canal_id=canal_id,
                     template_mensagem=template_data['template_mensagem'],
                     links=context.user_data['links_received']
@@ -2784,10 +2775,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             button_text = context.user_data.get('global_button_text')
             
             # Busca botões existentes e adiciona novo
-            existing_buttons = db.get_global_buttons(canal_id)
+            existing_buttons = await get_global_buttons(canal_id)
             buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons]
             buttons_list.append((button_text, button_url))
-            db.save_global_buttons(canal_id, buttons_list)
+            await save_global_buttons(canal_id, buttons_list)
             
             # Limpa contexto
             for key in ['adicionando_global_button', 'global_button_canal_id', 
@@ -2798,7 +2789,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dados = context.user_data.get('editando', {})
             dados['canal_id'] = canal_id
             
-            global_buttons = db.get_global_buttons(canal_id)
+            global_buttons = await get_global_buttons(canal_id)
             
             mensagem = "✅ <b>Botão global adicionado!</b>\n\n"
             mensagem += "🔘 <b>Botões Globais</b>\n\n"
@@ -2907,10 +2898,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_text = context.user_data.get('global_button_new_text')
             
             # Busca botões existentes, remove o antigo e adiciona o novo
-            existing_buttons = db.get_global_buttons(canal_id)
+            existing_buttons = await get_global_buttons(canal_id)
             buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons if btn['id'] != button_id]
             buttons_list.append((new_text, new_url))
-            db.save_global_buttons(canal_id, buttons_list)
+            await save_global_buttons(canal_id, buttons_list)
             
             # Limpa contexto
             for key in ['editando_global_button', 'global_button_id', 'global_button_canal_id',
@@ -2918,7 +2909,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.pop(key, None)
             
             # Retorna ao menu de botões globais
-            global_buttons = db.get_global_buttons(canal_id)
+            global_buttons = await get_global_buttons(canal_id)
             
             mensagem = "✅ <b>Botão global atualizado!</b>\n\n"
             mensagem += "🔘 <b>Botões Globais</b>\n\n"
@@ -2998,10 +2989,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             button_text = context.user_data.get('inline_button_text')
             
             # Busca botões existentes e adiciona novo
-            existing_buttons = db.get_inline_buttons(template_id)
+            existing_buttons = await get_inline_buttons(template_id)
             buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons]
             buttons_list.append((button_text, button_url))
-            db.save_inline_buttons(template_id, buttons_list)
+            await save_inline_buttons(template_id, buttons_list)
             
             # Limpa contexto
             for key in ['adicionando_inline_button', 'inline_button_template_id', 
@@ -3052,10 +3043,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_text = context.user_data.get('inline_button_new_text')
             
             # Busca botões existentes, remove o antigo e adiciona o novo
-            existing_buttons = db.get_inline_buttons(template_id)
+            existing_buttons = await get_inline_buttons(template_id)
             buttons_list = [(btn['text'], btn['url']) for btn in existing_buttons if btn['id'] != button_id]
             buttons_list.append((new_text, new_url))
-            db.save_inline_buttons(template_id, buttons_list)
+            await save_inline_buttons(template_id, buttons_list)
             
             # Limpa contexto
             for key in ['editando_inline_button', 'inline_button_id', 'inline_button_template_id',
@@ -3083,7 +3074,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         num_links = context.user_data['editing_num_links']
         
         # Atualiza todos os links
-        updated_count = db.update_all_links(template_id, link_url)
+        updated_count = await update_all_links(template_id, link_url)
         
         if updated_count > 0:
             # Limpa contexto
@@ -3119,7 +3110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ordem = context.user_data['editing_ordem']
         
         # Atualiza o link
-        updated = db.update_link(link_id, link_url)
+        updated = await update_link(link_id, link_url)
         
         if updated:
             # Limpa contexto
@@ -3150,7 +3141,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         template_id = context.user_data['mudando_link_template_id']
         
         # Atualiza todos os links sem exceção
-        updated_count = db.update_all_links(template_id, link_url)
+        updated_count = await update_all_links(template_id, link_url)
         
         if updated_count > 0:
             # Limpa contexto
@@ -3197,7 +3188,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         template_id = context.user_data['mudando_link_template_id']
-        template = db.get_template_with_link_ids(template_id)
+        template = await get_template_with_link_ids(template_id)
         
         if not template:
             await update.message.reply_text("❌ Template não encontrado.", parse_mode='HTML')
@@ -3225,7 +3216,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         new_url = f"https://t.me/{new_bot_username}"
                     
                     # Atualiza o link
-                    if db.update_link(link_id, new_url):
+                    if await update_link(link_id, new_url):
                         updated_count += 1
         
         # Limpa contexto
@@ -3253,7 +3244,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         template_id = context.user_data['mudando_link_template_id']
-        template = db.get_template_with_link_ids(template_id)
+        template = await get_template_with_link_ids(template_id)
         
         if not template:
             await update.message.reply_text("❌ Template não encontrado.", parse_mode='HTML')
@@ -3265,7 +3256,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for link_id, segmento, url_atual, ordem in links:
             # Só atualiza se NÃO for link do Telegram
             if not url_atual.startswith('https://t.me/'):
-                if db.update_link(link_id, link_url):
+                if await update_link(link_id, link_url):
                     updated_count += 1
         
         # Limpa contexto
@@ -3294,14 +3285,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         canal_id = context.user_data['mudando_link_canal_id']
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         total_updated = 0
         templates_affected = 0
         
         for template in templates:
             template_id = template['id']
-            updated_count = db.update_all_links(template_id, link_url)
+            updated_count = await update_all_links(template_id, link_url)
             if updated_count > 0:
                 total_updated += updated_count
                 templates_affected += 1
@@ -3363,14 +3354,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         canal_id = context.user_data['mudando_link_canal_id']
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         total_updated = 0
         templates_affected = 0
         
         for template in templates:
             template_id = template['id']
-            template_data = db.get_template_with_link_ids(template_id)
+            template_data = await get_template_with_link_ids(template_id)
             
             if not template_data:
                 continue
@@ -3397,7 +3388,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             new_url = f"https://t.me/{new_bot_username}"
                         
                         # Atualiza o link
-                        if db.update_link(link_id, new_url):
+                        if await update_link(link_id, new_url):
                             total_updated += 1
                             template_had_updates = True
             
@@ -3442,14 +3433,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         canal_id = context.user_data['mudando_link_canal_id']
-        templates = db.get_templates_by_canal(canal_id)
+        templates = await get_templates_by_canal(canal_id)
         
         total_updated = 0
         templates_affected = 0
         
         for template in templates:
             template_id = template['id']
-            template_data = db.get_template_with_link_ids(template_id)
+            template_data = await get_template_with_link_ids(template_id)
             
             if not template_data:
                 continue
@@ -3460,7 +3451,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for link_id, segmento, url_atual, ordem in links:
                 # Só atualiza se NÃO for link do Telegram
                 if not url_atual.startswith('https://t.me/'):
-                    if db.update_link(link_id, link_url):
+                    if await update_link(link_id, link_url):
                         total_updated += 1
                         template_had_updates = True
             
@@ -3703,7 +3694,7 @@ async def show_edit_panel(query_or_message, template_id: int, context, success_m
     Mostra o painel de edição de links de um template
     Pode receber CallbackQuery ou Message
     """
-    template = db.get_template_with_link_ids(template_id)
+    template = await get_template_with_link_ids(template_id)
     
     if not template:
         if hasattr(query_or_message, 'edit_message_text'):
@@ -3810,7 +3801,7 @@ async def mostrar_menu_medias(query, context):
         return
     
     # Busca grupos de mídias do canal
-    media_groups = db.get_media_groups_by_user(user_id, canal_id)
+    media_groups = await get_media_groups_by_user(user_id, canal_id)
     
     mensagem = "📸 <b>Gerenciar Mídias</b>\n\n"
     mensagem += "Escolha uma opção:\n\n"
@@ -3850,7 +3841,7 @@ async def mostrar_menu_medias(query, context):
 
 async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
     """Mostra detalhes de um grupo de mídias"""
-    group = db.get_media_group(group_id)
+    group = await get_media_group(group_id)
     
     if not group:
         await query.edit_message_text("❌ Grupo de mídias não encontrado.", parse_mode='HTML')
@@ -3869,13 +3860,13 @@ async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
     # Verifica se tem template associado
     template_info = ""
     if group.get('template_id'):
-        template = db.get_template(group['template_id'])
+        template = await get_template(group['template_id'])
         if template:
             template_info = f"\n📝 Template: ID {group['template_id']}"
     else:
         # Verifica se há templates disponíveis no canal para uso automático
         if group.get('canal_id'):
-            templates = db.get_templates_by_canal(group['canal_id'])
+            templates = await get_templates_by_canal(group['canal_id'])
             if templates:
                 template_info = f"\n📝 Template: ⚡ Automático (usará qualquer template do canal)"
             else:
@@ -3888,7 +3879,7 @@ async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
     # Busca botões globais
     global_buttons_info = ""
     if group.get('canal_id'):
-        global_buttons = db.get_global_buttons(group['canal_id'])
+        global_buttons = await get_global_buttons(group['canal_id'])
         if global_buttons:
             global_buttons_info = f"\n🔘 Botões Globais: {len(global_buttons)} botão(ões)"
         else:
@@ -3926,7 +3917,7 @@ async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
 async def enviar_preview_grupo_midia(query, context, group_id: int):
     """Envia preview do grupo de mídias com template e botões"""
     # Busca o grupo de mídias
-    group = db.get_media_group(group_id)
+    group = await get_media_group(group_id)
     
     if not group:
         await query.edit_message_text("❌ Grupo de mídias não encontrado.", parse_mode='HTML')
@@ -3940,12 +3931,12 @@ async def enviar_preview_grupo_midia(query, context, group_id: int):
     # Se não houver, o media_handler buscará automaticamente
     template = None
     if group.get('template_id'):
-        template = db.get_template(group['template_id'])
+        template = await get_template(group['template_id'])
     
     # Busca botões globais do canal (sempre busca, mesmo sem template)
     global_buttons = None
     if group.get('canal_id'):
-        global_buttons = db.get_global_buttons(group['canal_id'])
+        global_buttons = await get_global_buttons(group['canal_id'])
         # Se não encontrou botões, deixa como None (o media_handler tentará buscar novamente)
     
     # Envia mensagem de carregamento
@@ -4013,7 +4004,7 @@ async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     canal_id = context.user_data.get('canal_id_midia')
     
     # Cria com nome temporário
-    group_id = db.create_media_group(
+    group_id = await create_media_group(
         nome="Grupo Temp",
         user_id=user_id,
         canal_id=canal_id
@@ -4021,11 +4012,11 @@ async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Atualiza o nome com o ID
     novo_nome = f"Grupo {group_id}"
-    db.update_media_group(group_id, nome=novo_nome)
+    await update_media_group(group_id, nome=novo_nome)
     
     # Adiciona todas as mídias ao grupo
     for ordem, media_id in enumerate(medias_temp, start=1):
-        db.add_media_to_group(group_id, media_id, ordem=ordem)
+        await add_media_to_group(group_id, media_id, ordem=ordem)
     
     # Limpa contexto
     for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 
@@ -4051,6 +4042,9 @@ scheduler = None
 async def post_init(application: Application) -> None:
     """Inicializa o scheduler após o bot estar pronto"""
     global scheduler
+
+    # Conecta ao banco de dados Prisma
+    await prisma.connect()
     
     # Define os comandos do bot
     await set_bot_commands(application)
@@ -4059,11 +4053,17 @@ async def post_init(application: Application) -> None:
     import asyncio
     await asyncio.sleep(2)
     
-    scheduler = MediaScheduler(db, media_handler, application.bot)
+    scheduler = MediaScheduler(media_handler, application.bot)
     
     # Inicia o scheduler em background
     asyncio.create_task(scheduler.run_scheduler())
     logger.info("🚀 Scheduler de mídias iniciado!")
+
+async def post_shutdown(application: Application) -> None:
+    """Desconecta o cliente Prisma ao encerrar o bot"""
+    await prisma.disconnect()
+    logger.info("🔌 Prisma desconectado.")
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Trata erros que ocorrem durante o processamento de updates"""
@@ -4079,7 +4079,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def main():
     """Função principal para iniciar o bot"""
     # Cria a aplicação
-    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
     
     # Adiciona error handler para tratar conflitos de forma silenciosa
     application.add_error_handler(error_handler)

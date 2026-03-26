@@ -1,0 +1,136 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+model Canal {
+  id             Int                 @id @default(autoincrement())
+  nome           String
+  user_id        BigInt
+  created_at     DateTime            @default(now())
+  ids            CanalId[]
+  horarios       Horario[]
+  templates      Template[]
+  global_buttons CanalGlobalButton[]
+  media_groups   MediaGroup[]
+  media_cycles   MediaCycle[]
+}
+
+model CanalId {
+  id          Int    @id @default(autoincrement())
+  canal_id    Int
+  telegram_id String
+  ordem       Int
+  canal       Canal  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
+}
+
+model Horario {
+  id       Int    @id @default(autoincrement())
+  canal_id Int
+  horario  String
+  ordem    Int
+  canal    Canal  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
+}
+
+model Template {
+  id                Int                    @id @default(autoincrement())
+  canal_id          Int
+  template_mensagem String
+  created_at        DateTime               @default(now())
+  canal             Canal                  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
+  links             TemplateLink[]
+  inline_buttons    TemplateInlineButton[]
+  media_groups      MediaGroup[]
+}
+
+model TemplateLink {
+  id                Int      @id @default(autoincrement())
+  template_id       Int
+  segmento_com_link String
+  link_da_mensagem  String
+  ordem             Int
+  template          Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
+}
+
+model TemplateInlineButton {
+  id          Int      @id @default(autoincrement())
+  template_id Int
+  button_text String
+  button_url  String
+  ordem       Int
+  template    Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
+}
+
+model CanalGlobalButton {
+  id          Int    @id @default(autoincrement())
+  canal_id    Int
+  button_text String
+  button_url  String
+  ordem       Int
+  canal       Canal  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
+}
+
+model MediaGroup {
+  id          Int              @id @default(autoincrement())
+  nome        String
+  user_id     BigInt
+  canal_id    Int?
+  template_id Int?
+  created_at  DateTime         @default(now())
+  canal       Canal?           @relation(fields: [canal_id], references: [id], onDelete: SetNull)
+  template    Template?        @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  items       MediaGroupItem[]
+}
+
+model Media {
+  id                Int              @id @default(autoincrement())
+  file_id           String
+  file_unique_id    String
+  media_type        String
+  file_size         Int?
+  width             Int?
+  height            Int?
+  duration          Int?
+  thumbnail_file_id String?
+  created_at        DateTime         @default(now())
+  group_items       MediaGroupItem[]
+}
+
+model MediaGroupItem {
+  id             Int        @id @default(autoincrement())
+  media_group_id Int
+  media_id       Int
+  ordem          Int
+  caption        String?
+  media_group    MediaGroup @relation(fields: [media_group_id], references: [id], onDelete: Cascade)
+  media          Media      @relation(fields: [media_id], references: [id], onDelete: Cascade)
+}
+
+model MediaCycle {
+  canal_id    Int
+  cycle_order String
+  cycle_date  String
+  canal       Canal  @relation(fields: [canal_id], references: [id])
+
+  @@id([canal_id, cycle_date])
+}
+
+model SentSchedule {
+  canal_id Int
+  horario  String
+  date     String
+
+  @@id([canal_id, horario, date])
+}
+
+model Admin {
+  user_id    BigInt   @id
+  username   String?
+  created_at DateTime @default(now())
+}
