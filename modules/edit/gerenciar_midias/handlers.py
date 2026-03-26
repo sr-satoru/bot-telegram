@@ -203,17 +203,37 @@ async def handle_edit_media_callback(query, context, media_handler, db):
     data = query.data
     
     if data == "edit_medias":
-        for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 'count_batch', 'medias_temporarias']:
+        # Limpeza de mensagens de lote (exceto a atual que será editada)
+        batch_ids = context.user_data.get('batch_message_ids', [])
+        current_msg_id = query.message.message_id
+        
+        for msg_id in batch_ids:
+            if msg_id != current_msg_id:
+                try:
+                    await context.bot.delete_message(chat_id=query.message.chat_id, message_id=msg_id)
+                except Exception:
+                    pass
+        
+        for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 'count_batch', 'medias_temporarias', 'batch_message_ids']:
             context.user_data.pop(key, None)
+            
         await mostrar_menu_medias(query, context)
         return True
         
     elif data == "salvar_midia_unica":
         canal_id = context.user_data.get('editando', {}).get('canal_id')
-        context.user_data.update({'salvando_midia': True, 'tipo_midia': 'unica', 'canal_id_midia': canal_id, 'count_batch': 0})
+        context.user_data.update({
+            'salvando_midia': True, 
+            'tipo_midia': 'unica', 
+            'canal_id_midia': canal_id, 
+            'count_batch': 0,
+            'batch_message_ids': []
+        })
         await query.edit_message_text("📸 <b>Mídia Única</b>\n\nEnvie uma foto ou vídeo.", 
                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancelar", callback_data="edit_medias")]]), 
                                     parse_mode='HTML')
+        # Adiciona o prompt inicial na lista de limpeza
+        context.user_data['batch_message_ids'].append(query.message.message_id)
         return True
         
     elif data == "salvar_midia_agrupada":
@@ -319,10 +339,15 @@ async def handle_edit_media_input(update: Update, context: ContextTypes.DEFAULT_
         count = context.user_data.get('count_batch', 0) + 1
         context.user_data['count_batch'] = count
         
-        await update.message.reply_text(
+        reply = await update.message.reply_text(
             f"✅ Mídia solo #{count} salva! Continue enviando ou clique no botão abaixo para finalizar.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔚 Finalizar e Voltar", callback_data="edit_medias")]])
         )
+        
+        # Armazena ID para limpeza posterior
+        batch_ids = context.user_data.get('batch_message_ids', [])
+        batch_ids.append(reply.message_id)
+        context.user_data['batch_message_ids'] = batch_ids
     else:
         medias = context.user_data.get('medias_temporarias', [])
         if len(medias) >= 10:
