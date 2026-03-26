@@ -284,7 +284,8 @@ class MediaHandler:
                 caption = template_text
 
             for button in template.get('inline_buttons', []):
-                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
+                if button.get('status') == "ATIVO":
+                    all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
 
         if global_buttons:
             for button in global_buttons:

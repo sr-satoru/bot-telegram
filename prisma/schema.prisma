@@ -64,6 +64,7 @@ model TemplateInlineButton {
   button_text String
   button_url  String
   ordem       Int
+  status      String   @default("ATIVO")
   template    Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
 }
 

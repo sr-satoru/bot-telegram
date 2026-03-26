@@ -69,7 +69,7 @@ async def mostrar_menu_edicao(obj, context: ContextTypes.DEFAULT_TYPE, extra_tex
             InlineKeyboardButton("📝 Gerenciar Templates", callback_data="edit_templates"),
         ],
         [
-            InlineKeyboardButton("🔘 Botões Globais", callback_data="edit_global_buttons"),
+            InlineKeyboardButton("🔘 Botões Globais", callback_data=f"global_button_tg_list_{dados.get('canal_id')}"),
         ],
         [
             InlineKeyboardButton("📸 Gerenciar Mídias", callback_data="edit_medias"),

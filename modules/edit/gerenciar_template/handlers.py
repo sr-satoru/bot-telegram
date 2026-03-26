@@ -121,10 +121,31 @@ async def handle_edit_template_callback(query, context, parser):
 
     elif data.startswith("edit_template_"):
         template_id = int(data.split("_")[-1])
+        context.user_data['editing_template_id'] = template_id
         template = await get_template_with_link_ids(template_id)
         if not template: return True
         inline_buttons = await get_inline_buttons(template_id)
         await mostrar_painel_edicao_links(query, template, inline_buttons, context)
+        return True
+
+    elif data.startswith("edit_link_"):
+        link_id = int(data.split("_")[-1])
+        link_info = await get_link_info(link_id)
+        if not link_info: return True
+        
+        lid, tid, segmento, url, ordem = link_info
+        context.user_data['editing_link_id'] = lid
+        context.user_data['editing_template_id'] = tid
+        context.user_data['editing_segmento'] = segmento
+        context.user_data['editing_ordem'] = ordem
+        
+        await query.edit_message_text(
+            f"🔗 <b>Editando Link {ordem}</b>\n\n"
+            f"Segmento: <code>{segmento}</code>\n"
+            f"Link atual: <code>{url}</code>\n\n"
+            "Envie o novo link para este segmento ou use /cancelar para voltar:",
+            parse_mode='HTML'
+        )
         return True
 
     elif data.startswith("mudar_link_geral_canal_"):
@@ -213,6 +234,19 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
     message_text = update.message.text or update.message.caption or ""
     message_html = update.message.text_html or update.message.caption_html or message_text
 
+    # Comando cancelar
+    if message_text == "/cancelar":
+        # Se estiver editando links de um template
+        if 'editing_link_id' in user_data or 'editing_all_links' in user_data:
+            tid = user_data.get('editing_template_id')
+            for key in ['editing_link_id', 'editing_all_links', 'editing_num_links', 'editing_segmento', 'editing_ordem']: 
+                user_data.pop(key, None)
+            if tid:
+                template = await get_template_with_link_ids(tid)
+                inline_buttons = await get_inline_buttons(tid)
+                await mostrar_painel_edicao_links(update.message, template, inline_buttons, context, success_message="❌ Operação cancelada.")
+                return True
+
     # Fluxo de Criação
     if user_data.get('criando_template'):
         etapa = user_data.get('etapa')
@@ -263,19 +297,32 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
     if 'editing_all_links' in user_data:
         tid = user_data['editing_template_id']
         await update_all_links(tid, message_text.strip())
-        for key in ['editing_all_links', 'editing_template_id', 'editing_num_links']: user_data.pop(key, None)
-        templates = await get_templates_by_canal(canal_id)
-        await mostrar_lista_templates(update.message, templates, canal_id, context, extra_text="✅ Todos os links atualizados!")
+        
+        # Recupera dados para mostrar o painel editado
+        template = await get_template_with_link_ids(tid)
+        inline_buttons = await get_inline_buttons(tid)
+        
+        for key in ['editing_all_links', 'editing_num_links']: user_data.pop(key, None)
+        
+        await update.message.reply_text("✅ Todos os links atualizados!")
+        await mostrar_painel_edicao_links(update.message, template, inline_buttons, context)
         return True
 
     if 'editing_link_id' in user_data:
         lid = user_data['editing_link_id']
         tid = user_data['editing_template_id']
         await update_link(lid, message_text.strip())
-        for key in ['editing_link_id', 'editing_template_id', 'editing_segmento', 'editing_ordem']: user_data.pop(key, None)
-        canal_id = context.user_data.get('editando', {}).get('canal_id')
-        templates = await get_templates_by_canal(canal_id)
-        await mostrar_lista_templates(update.message, templates, canal_id, context, extra_text="✅ Link atualizado!")
+        
+        # Recupera dados para mostrar o painel editado
+        template = await get_template_with_link_ids(tid)
+        inline_buttons = await get_inline_buttons(tid)
+        
+        # Limpa contexto de edição de link MAS mantém editing_template_id se necessário para o painel?
+        # mostrar_painel_edicao_links já recebe o template objeto.
+        for key in ['editing_link_id', 'editing_segmento', 'editing_ordem']: user_data.pop(key, None)
+        
+        await update.message.reply_text("✅ Link atualizado!")
+        await mostrar_painel_edicao_links(update.message, template, inline_buttons, context)
         return True
 
     # Fluxo de Mudar Link Global Canal

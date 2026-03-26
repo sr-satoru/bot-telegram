@@ -157,7 +157,7 @@ async def get_template(template_id: int) -> Optional[Dict]:
         "template_mensagem": t.template_mensagem,
         "created_at": t.created_at,
         "links": [{"id": l.id, "segmento": l.segmento_com_link, "link": l.link_da_mensagem, "ordem": l.ordem} for l in t.links],
-        "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in t.inline_buttons],
+        "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in t.inline_buttons],
     }
 
 async def get_templates_by_canal(canal_id: int) -> List[Dict]:
@@ -175,7 +175,7 @@ async def get_templates_by_canal(canal_id: int) -> List[Dict]:
             "template_mensagem": t.template_mensagem,
             "created_at": t.created_at,
             "links": [{"segmento": l.segmento_com_link, "link": l.link_da_mensagem, "ordem": l.ordem} for l in t.links],
-            "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in t.inline_buttons],
+            "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in t.inline_buttons],
         }
         for t in templates
     ]
@@ -199,7 +199,7 @@ async def get_template_with_link_ids(template_id: int) -> Optional[Dict]:
         "id": t.id, "canal_id": t.canal_id,
         "template_mensagem": t.template_mensagem,
         "links": [(l.id, l.segmento_com_link, l.link_da_mensagem, l.ordem) for l in t.links],
-        "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in t.inline_buttons],
+        "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in t.inline_buttons],
     }
 
 async def update_link(link_id: int, link_url: str) -> bool:
@@ -237,7 +237,7 @@ async def get_inline_buttons(template_id: int) -> List[Dict]:
     buttons = await prisma.templateinlinebutton.find_many(
         where={"template_id": template_id}, order={"ordem": "asc"}
     )
-    return [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in buttons]
+    return [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in buttons]
 
 async def delete_inline_button(button_id: int) -> bool:
     result = await prisma.templateinlinebutton.delete_many(where={"id": button_id})
@@ -247,7 +247,19 @@ async def get_inline_button_info(button_id: int) -> Optional[Dict]:
     b = await prisma.templateinlinebutton.find_unique(where={"id": button_id})
     if not b:
         return None
-    return {"id": b.id, "template_id": b.template_id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem}
+    return {"id": b.id, "template_id": b.template_id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status}
+
+async def toggle_inline_button_status(button_id: int) -> Optional[str]:
+    """Alterna o status entre ATIVO e INATIVO. Retorna novo status."""
+    b = await prisma.templateinlinebutton.find_unique(where={"id": button_id})
+    if not b: return None
+    
+    new_status = "INATIVO" if b.status == "ATIVO" else "ATIVO"
+    await prisma.templateinlinebutton.update(
+        where={"id": button_id},
+        data={"status": new_status}
+    )
+    return new_status
 
 
 # ──────────────────────────────────────────────

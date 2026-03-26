@@ -16,22 +16,31 @@ async def mostrar_menu_botoes(obj, parent_id, owner_type='canal', texto_extra=""
         mensagem += f"<b>Botões configurados ({len(buttons)}):</b>\n"
         for i, button in enumerate(buttons, 1):
             url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
-            mensagem += f"{i}. '{button['text']}'\n   → {url_display}\n\n"
+            status_icon = "🟢" if button.get('status') == "ATIVO" else "🔴"
+            status_text = f" ({status_icon})" if owner_type == 'template' else ""
+            mensagem += f"{i}. '{button['text']}'{status_text}\n   → {url_display}\n\n"
     else:
         mensagem += f"❌ Nenhum botão {label.lower()} configurado\n\n"
     
     keyboard = []
+    prefix = "global_button_tg" if owner_type == 'canal' else "fix_button_tg"
+    
     for button in buttons:
-        prefix = "global" if owner_type == 'canal' else "template"
         button_display = button['text'][:25] + "..." if len(button['text']) > 25 else button['text']
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {button_display}", callback_data=f"edit_{prefix}_button_{button['id']}"),
-            InlineKeyboardButton("🗑️", callback_data=f"deletar_{prefix}_button_{button['id']}")
-        ])
+        
+        row = [
+            InlineKeyboardButton(f"✏️ {button_display}", callback_data=f"{prefix}_edit_{button['id']}"),
+        ]
+        
+        if owner_type == 'template':
+            toggle_label = "🔴 Desativar" if button.get('status') == "ATIVO" else "🟢 Ativar"
+            row.append(InlineKeyboardButton(toggle_label, callback_data=f"{prefix}_tgl_{button['id']}"))
+            
+        row.append(InlineKeyboardButton("🗑️", callback_data=f"{prefix}_del_{button['id']}"))
+        keyboard.append(row)
     
     add_label = "Botão Global" if owner_type == 'canal' else "Botão no Template"
-    prefix = "global" if owner_type == 'canal' else "template"
-    keyboard.append([InlineKeyboardButton(f"➕ Adicionar {add_label}", callback_data=f"adicionar_{prefix}_button_{parent_id}")])
+    keyboard.append([InlineKeyboardButton(f"➕ Adicionar {add_label}", callback_data=f"{prefix}_add_{parent_id}")])
     
     back_data = "edit_voltar" if owner_type == 'canal' else f"edit_template_{parent_id}"
     keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data=back_data)])

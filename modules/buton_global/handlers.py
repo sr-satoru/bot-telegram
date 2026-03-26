@@ -6,29 +6,35 @@ from .ui import (
 from .utils import (
     get_any_buttons, save_any_buttons, delete_any_button, get_any_button_info
 )
+from db_helpers import toggle_inline_button_status
 
 async def handle_any_button_callback(query, context, owner_type='canal'):
     """Router genérico para callbacks de botões (canal ou template)"""
     data = query.data
-    prefix = "global" if owner_type == 'canal' else "template"
+    prefix = "global_button_tg" if owner_type == 'canal' else "fix_button_tg"
     
-    # Suporte a prefixos alternativos (ex: inline_button vindo da UI antiga de template)
-    if owner_type == 'template' and "inline_button" in data:
-        data = data.replace("inline_button", "template_button")
+    # Suporte a prefixos legados (opcional, mas bom para transição rápida se houver mensagens antigas)
+    if "template_button_" in data: data = data.replace("template_button_", "fix_button_tg_")
+    if "inline_button_" in data: data = data.replace("inline_button_", "fix_button_tg_")
+    if "global_button_" in data and "global_button_tg" not in data: data = data.replace("global_button_", "global_button_tg_")
 
-    if data == f"edit_{prefix}_buttons":
-        # Conserta busca de parent_id para canal (pode estar em 'id' ou 'canal_id')
-        if owner_type == 'canal':
-            edit_data = context.user_data.get('editando', {})
-            parent_id = edit_data.get('canal_id') or edit_data.get('id')
+    if data.startswith(f"{prefix}_list_") or data == "edit_template_buttons":
+        # Nota: 'edit_template_buttons' é o callback que vem do menu de template
+        if "_" in data and data.split("_")[-1].isdigit():
+            parent_id = int(data.split("_")[-1])
         else:
-            parent_id = context.user_data.get('editing_template_id')
-            
+            # Fallback para user_data se o ID não estiver no callback
+            if owner_type == 'canal':
+                edit_data = context.user_data.get('editando', {})
+                parent_id = edit_data.get('canal_id') or edit_data.get('id')
+            else:
+                parent_id = context.user_data.get('editing_template_id')
+                
         if not parent_id: return True
         await mostrar_menu_botoes(query, parent_id, owner_type)
         return True
         
-    elif data.startswith(f"adicionar_{prefix}_button_"):
+    elif data.startswith(f"{prefix}_add_"):
         parent_id = int(data.split("_")[-1])
         context.user_data['adicionando_button'] = True
         context.user_data['button_parent_id'] = parent_id
@@ -37,7 +43,7 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
         await mostrar_prompt_texto_botao(query, is_edit=False)
         return True
         
-    elif data.startswith(f"edit_{prefix}_button_"):
+    elif data.startswith(f"{prefix}_edit_"):
         button_id = int(data.split("_")[-1])
         btn_info = await get_any_button_info(button_id, owner_type)
         if not btn_info: return True
@@ -50,14 +56,14 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
         await mostrar_prompt_texto_botao(query, is_edit=True, text_atual=btn_info['text'], url_atual=btn_info['url'])
         return True
         
-    elif data.startswith(f"deletar_{prefix}_button_"):
+    elif data.startswith(f"{prefix}_del_"):
         button_id = int(data.split("_")[-1])
         btn_info = await get_any_button_info(button_id, owner_type)
         if btn_info:
             await mostrar_confirmacao_delecao(query, button_id, btn_info['text'], owner_type)
         return True
         
-    elif data.startswith(f"confirmar_deletar_{prefix}_button_"):
+    elif data.startswith(f"{prefix}_cdel_"):
         button_id = int(data.split("_")[-1])
         btn_info = await get_any_button_info(button_id, owner_type)
         if not btn_info: return True
@@ -65,6 +71,16 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
         parent_id = btn_info.get('canal_id') or btn_info.get('template_id')
         await delete_any_button(button_id, owner_type)
         await mostrar_menu_botoes(query, parent_id, owner_type, "✅ Botão deletado!")
+        return True
+
+    elif data.startswith(f"{prefix}_tgl_"):
+        button_id = int(data.split("_")[-1])
+        if owner_type == 'template':
+            new_status = await toggle_inline_button_status(button_id)
+            btn_info = await get_any_button_info(button_id, owner_type)
+            parent_id = btn_info.get('template_id')
+            label = "ativado" if new_status == "ATIVO" else "desativado"
+            await mostrar_menu_botoes(query, parent_id, owner_type, f"✅ Botão {label}!")
         return True
 
     elif data.startswith("cancelar_delecao_"):
