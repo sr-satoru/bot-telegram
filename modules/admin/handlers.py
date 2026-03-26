@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes
 from db_helpers import (
     get_all_admins, add_admin, remove_admin, get_admin, get_all_canais
 )
-from bot_utils import is_super_admin
+from modules.utils import is_super_admin
 
 logger = logging.getLogger(__name__)
 

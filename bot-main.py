@@ -28,7 +28,7 @@ from modules.criar_canal import (
     mostrar_menu_horarios_text,
     validar_horario
 )
-from bot_utils import is_super_admin, is_admin, require_admin, require_super_admin
+from modules.utils import is_super_admin, is_admin, require_admin, require_super_admin
 from modules.edit.editar_nome import handle_edit_nome_callback, handle_edit_nome_message
 from modules.edit.gerenciar_id import handle_edit_ids_callback, handle_edit_ids_message, mostrar_menu_ids
 from modules.edit.gerenciar_time import handle_edit_time_callback, handle_edit_time_message, mostrar_menu_horarios_edicao
@@ -39,7 +39,7 @@ from modules.admin import handle_admin_callback, handle_admin_message
 from db_helpers import (
     get_canal, get_all_canais, update_canal, get_template, get_templates_by_canal
 )
-from parser import MessageParser
+from modules.capture_parse_mode import MessageParser
 from media_handler import MediaHandler
 from modules.post import MediaScheduler
 from setcomando import set_bot_commands

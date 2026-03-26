@@ -2,7 +2,7 @@ import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from db_helpers import get_canal, delete_canal
-from bot_utils import is_super_admin
+from modules.utils import is_super_admin
 
 logger = logging.getLogger(__name__)
 

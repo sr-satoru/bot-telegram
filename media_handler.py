@@ -264,7 +264,7 @@ class MediaHandler:
         all_buttons = []
 
         if template:
-            from parser import MessageParser
+            from modules.capture_parse_mode import MessageParser
             parser = MessageParser()
             template_text = template['template_mensagem']
             links = template.get('links', [])

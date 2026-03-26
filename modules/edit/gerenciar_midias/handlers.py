@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
-from bot_utils import require_admin
+from modules.utils import require_admin
 from db_helpers import (
     get_media_groups_by_user, get_media_group, delete_media_group,
     create_media_group, update_media_group, add_media_to_group,
