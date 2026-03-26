@@ -660,11 +660,76 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Cancela a deleção e volta para o menu de edição
         await mostrar_menu_edicao(query, context)
     
+    elif query.data == "confirmar_salvar_estatico":
+        # Salva um template que não possui links (apenas formatação)
+        template_data = context.user_data.get('pending_template')
+        canal_id = context.user_data.get('canal_id_template')
+        
+        if not template_data or not canal_id:
+            await query.answer("❌ Erro ao recuperar dados do template.")
+            return
+
+        template_id = await save_template(
+            canal_id=canal_id,
+            template_mensagem=template_data['template_mensagem'],
+            links=[]
+        )
+        
+        # Limpa contexto
+        for key in ['criando_template', 'etapa', 'canal_id_template', 'pending_template', 'original_message']:
+            context.user_data.pop(key, None)
+            
+        keyboard = [[InlineKeyboardButton("✅ Finalizar", callback_data="voltar_start")]]
+        await query.edit_message_text(
+            f"✅ <b>Template estático salvo!</b>\n\n"
+            f"📝 ID: {template_id}\n"
+            f"⚠️ Este template não possui links dinâmicos.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
+    
+    elif query.data == "link_choice_keep":
+        # Salva o template usando os links originais que vieram na mensagem
+        template_data = context.user_data.get('pending_template')
+        canal_id = context.user_data.get('canal_id_template')
+        links_originais = context.user_data.get('links_received', [])
+        
+        if not template_data or not canal_id:
+            await query.answer("❌ Erro ao recuperar dados do template.")
+            return
+            
+        # Constrói a lista de tuplas (segmento, url)
+        links_list = []
+        for i, url in enumerate(links_originais):
+            link_text = template_data['segmentos'][i]
+            links_list.append((link_text, url))
+            
+        template_id = await save_template(
+            canal_id=canal_id,
+            template_mensagem=template_data['template_mensagem'],
+            links=links_list
+        )
+        
+        # Limpa contexto
+        for key in ['criando_template', 'etapa', 'canal_id_template', 'pending_template', 
+                   'original_message', 'links_received', 'current_link_index']:
+            context.user_data.pop(key, None)
+            
+        keyboard = [[InlineKeyboardButton("✅ Finalizar", callback_data="voltar_start")]]
+        await query.edit_message_text(
+            f"✅ <b>Template salvo com links originais!</b>\n\n"
+            f"📝 ID: {template_id}\n"
+            f"🔗 Links salvos: {len(links_list)}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
+    
     elif query.data == "link_choice_same":
         # Usar o mesmo link para todos
         context.user_data['use_same_link'] = True
         context.user_data['waiting_for_link_choice'] = False
         context.user_data['etapa'] = 'recebendo_link'
+        context.user_data['links_received'] = [] # Limpa os links detectados anteriormente
         
         template_data = context.user_data['pending_template']
         num_links = template_data['num_links']
@@ -681,6 +746,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['use_same_link'] = False
         context.user_data['waiting_for_link_choice'] = False
         context.user_data['etapa'] = 'recebendo_link'
+        context.user_data['links_received'] = [] # Limpa os links detectados anteriormente
         
         template_data = context.user_data['pending_template']
         segmentos = template_data['segmentos']
@@ -2090,8 +2156,17 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_admin
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para mensagens de texto"""
-    message_text = update.message.text
+    """Handler para mensagens de texto e legendas"""
+    # Captura o texto ou legenda com HTML para preservar formatação e links
+    message_html = ""
+    if update.message.text_html:
+        message_html = update.message.text_html
+    elif update.message.caption_html:
+        message_html = update.message.caption_html
+    else:
+        message_html = update.message.text or update.message.caption or ""
+        
+    message_text = update.message.text or update.message.caption or ""
     user_id = update.message.from_user.id
     
     # Verifica se está adicionando admin
@@ -2157,51 +2232,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         canal_id = context.user_data.get('canal_id_template')
         
         if etapa == 'template_mensagem':
-            # Parseia a mensagem para extrair variáveis de link
-            parsed = parser.parse_and_save_template(message_text)
+            # Parseia a mensagem HTML para extrair links automaticamente
+            parsed = parser.parse_and_save_template(message_html)
             
-            if not parsed:
-                await update.message.reply_text(
-                    "⚠️ Nenhuma variável de link encontrada.\n\n"
-                    "Use o formato: <code>{link = texto}</code>\n\n"
-                    "Exemplo: <code>Olá {link = clique aqui} tudo certo</code>",
-                    parse_mode='HTML'
-                )
-                return
-            
+            # Mesmo sem links, salvamos como template (estático)
             # Salva o template temporariamente
             context.user_data['pending_template'] = parsed
-            context.user_data['original_message'] = message_text
-            context.user_data['links_received'] = []
+            context.user_data['original_message'] = message_html
+            context.user_data['links_received'] = parsed.get('urls_originais', []) # Pré-preenche com links detectados
             context.user_data['current_link_index'] = 0
             
             num_links = parsed['num_links']
             segmentos = parsed['segmentos']
             
-            response = f"✅ <b>Template detectado!</b>\n\n"
-            response += f"📝 Template: {parsed['template_mensagem']}\n\n"
-            response += f"🔗 {num_links} link(s) encontrado(s):\n"
-            
-            for i, segmento in enumerate(segmentos, 1):
-                response += f"{i}. '{segmento}'\n"
-            
-            # Se houver múltiplos links, mostra botões para escolher
-            if num_links > 1:
-                response += f"\n📌 Como configurar os links?"
-                context.user_data['waiting_for_link_choice'] = True
+            if num_links == 0:
+                # Template estático (sem links mutáveis)
+                response = f"✅ <b>Template detectado (estático)!</b>\n\n"
+                response += f"📝 Conteúdo: {parsed['template_mensagem']}\n\n"
+                response += "⚠️ Nenhum link clicável encontrado. Deseja salvar assim mesmo?"
                 
                 keyboard = [
-                    [InlineKeyboardButton("🔗 Mesmo link para todos", callback_data="link_choice_same")],
-                    [InlineKeyboardButton("🔗 Links separados", callback_data="link_choice_separate")]
+                    [InlineKeyboardButton("✅ Sim, salvar", callback_data="confirmar_salvar_estatico")],
+                    [InlineKeyboardButton("❌ Não, cancelar", callback_data=f"editar_canal_{canal_id}")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='HTML')
-            else:
-                # Se for apenas 1 link, vai direto pedir o URL
-                response += f"\nEnvie o URL do link:"
-                context.user_data['waiting_for_link_choice'] = False
-                context.user_data['etapa'] = 'recebendo_link'
-                await update.message.reply_text(response, parse_mode='HTML')
+                return
+
+            response = f"✅ <b>Template detectado!</b>\n\n"
+            response += f"📝 Template: {parsed['template_mensagem']}\n\n"
+            response += f"🔗 {num_links} link(s) identificado(s) automaticamente:\n"
+            
+            for i, segmento in enumerate(segmentos, 1):
+                # Mostra o segmento e o URL atual
+                url_atual = parsed['urls_originais'][i-1]
+                response += f"{i}. '{segmento}' → <code>{url_atual[:40]}...</code>\n"
+            
+            # Opções para os links detectados
+            response += f"\n📌 O que deseja fazer com os links?"
+            context.user_data['waiting_for_link_choice'] = True
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Manter links originais", callback_data="link_choice_keep")],
+                [InlineKeyboardButton("🔗 Mesmo link para todos", callback_data="link_choice_same")],
+                [InlineKeyboardButton("🔗 Alterar links um a um", callback_data="link_choice_separate")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='HTML')
             return
         
         elif etapa == 'recebendo_link':

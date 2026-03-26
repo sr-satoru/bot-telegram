@@ -269,10 +269,16 @@ class MediaHandler:
             template_text = template['template_mensagem']
             links = template.get('links', [])
             if links:
-                if isinstance(links[0], dict):
-                    link_tuples = [(l.get('segmento', ''), l.get('link', '')) for l in links]
-                else:
-                    link_tuples = [(l[1], l[2]) for l in links]
+                link_tuples = []
+                for l in links:
+                    # Suporte para objeto Prisma, dicionário ou tupla antiga
+                    if hasattr(l, 'segmento_com_link'):
+                        link_tuples.append((l.segmento_com_link, l.link_da_mensagem))
+                    elif isinstance(l, dict):
+                        link_tuples.append((l.get('segmento_com_link', ''), l.get('link_da_mensagem', '')))
+                    elif len(l) >= 3:
+                        link_tuples.append((l[1], l[2]))
+                
                 caption = parser.format_message_with_links(template_text, link_tuples)
             else:
                 caption = template_text

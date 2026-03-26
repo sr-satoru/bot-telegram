@@ -1,96 +1,70 @@
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 class MessageParser:
-    """Parser para extrair variáveis {link = ...} das mensagens"""
+    """Parser para extrair links de mensagens HTML e formatar templates preservando tags do Telegram"""
     
     @staticmethod
-    def extract_link_variables(text: str) -> List[Tuple[str, str]]:
+    def parse_and_save_template(html_text: str) -> Optional[Dict]:
         """
-        Extrai variáveis de link do formato {link = texto}
-        Retorna uma lista de tuplas: [(texto_com_link, texto_original), ...]
+        Parseia uma mensagem HTML e retorna informações do template.
+        Identifica automaticamente tags <a> e as substitui por placeholders [[link_N]].
+        Retorna None se não houver links (pode ser usado como template estático).
         """
-        pattern = r'\{link\s*=\s*([^}]+)\}'
-        matches = re.finditer(pattern, text)
+        # Regex para capturar tags <a>: grupo 1 = URL, grupo 2 = Conteúdo (inclui outras tags)
+        pattern = r'<a href="([^"]+)">([\s\S]*?)</a>'
+        matches = list(re.finditer(pattern, html_text))
         
-        results = []
-        for match in matches:
-            link_text = match.group(1).strip()
-            results.append((link_text, match.group(0)))
+        if not matches:
+            # Retorna o próprio HTML como template se não houver links
+            return {
+                'template_mensagem': html_text,
+                'segmentos': [],
+                'link_vars': [], # Antigo links_originais, mantido por compatibilidade
+                'urls_originais': [],
+                'num_links': 0
+            }
         
-        return results
-    
-    @staticmethod
-    def parse_and_save_template(text: str) -> Optional[dict]:
-        """
-        Parseia uma mensagem e retorna um dicionário com as informações do template
-        Suporta múltiplos links na mesma mensagem
-        Retorna None se não houver variáveis de link
-        """
-        link_vars = MessageParser.extract_link_variables(text)
-        
-        if not link_vars:
-            return None
-        
-        # Remove todas as variáveis do texto original para obter o template
-        template_mensagem = text
+        template_mensagem = html_text
         segmentos = []
-        link_vars_original = []
+        urls_originais = []
         
-        for link_text, link_var in link_vars:
-            template_mensagem = template_mensagem.replace(link_var, link_text)
-            segmentos.append(link_text)
-            link_vars_original.append(link_var)
-        
+        # Faz as substituições de trás para frente para não bagunçar os índices
+        for i, match in enumerate(reversed(matches)):
+            idx = len(matches) - i
+            url = match.group(1)
+            content = match.group(2)
+            
+            placeholder = f"[[link_{idx}]]"
+            start, end = match.span()
+            
+            template_mensagem = template_mensagem[:start] + placeholder + template_mensagem[end:]
+            
+            # Adiciona na ordem correta no final (invertendo a reversão)
+            segmentos.insert(0, content)
+            urls_originais.insert(0, url)
+            
         return {
             'template_mensagem': template_mensagem,
             'segmentos': segmentos,
-            'link_vars': link_vars_original,
+            'urls_originais': urls_originais,
             'num_links': len(segmentos)
         }
     
     @staticmethod
-    def format_message_with_links(template_mensagem: str, links: List[Tuple[str, str]]) -> str:
+    def format_message_with_links(template_html: str, links: List[Tuple[str, str]]) -> str:
         """
-        Formata uma mensagem HTML com múltiplos links embutidos
-        links: Lista de tuplas (segmento_com_link, link_url) na ordem de aparição
-        Suporta segmentos repetidos, aplicando cada link na ordem correta
+        Reconstrói a mensagem HTML substituindo placeholders [[link_N]] pelos URLs atuais.
+        links: Lista de tuplas (segmento_com_tags, link_url)
         """
-        # Escapa caracteres HTML especiais no template
-        formatted = template_mensagem.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        formatted = template_html
         
-        # Usa um offset para rastrear mudanças no tamanho do texto após substituições
-        offset = 0
-        
-        # Aplica os links na ordem de aparição (da esquerda para direita)
-        for segmento, link_url in links:
-            # Escapa o URL
-            link_url_escaped = link_url.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        # Substitui [[link_N]] baseado na ordem fornecida
+        for i, (segmento, link_url) in enumerate(links, 1):
+            placeholder = f"[[link_{i}]]"
+            # O link_url já deve estar devidamente escapado se vier do banco/user
+            link_html = f'<a href="{link_url}">{segmento}</a>'
+            formatted = formatted.replace(placeholder, link_html)
             
-            # Encontra a próxima ocorrência do segmento no texto
-            pattern = re.escape(segmento)
-            search_text = formatted[offset:]
-            match = re.search(pattern, search_text)
-            
-            if match:
-                # Ajusta a posição considerando o offset
-                start = offset + match.start()
-                end = offset + match.end()
-                
-                # Substitui esta ocorrência específica
-                link_html = f'<a href="{link_url_escaped}">{segmento}</a>'
-                formatted = formatted[:start] + link_html + formatted[end:]
-                
-                # Atualiza o offset
-                offset = start + len(link_html)
-            else:
-                # Fallback: tenta encontrar em todo o texto
-                match = re.search(pattern, formatted)
-                if match:
-                    start, end = match.span()
-                    link_html = f'<a href="{link_url_escaped}">{segmento}</a>'
-                    formatted = formatted[:start] + link_html + formatted[end:]
-                    offset = start + len(link_html)
-        
         return formatted
 
