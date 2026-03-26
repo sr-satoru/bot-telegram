@@ -298,10 +298,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             "📝 <b>Criar Template</b>\n\n"
-            "Envie a mensagem com variáveis de link:\n"
-            "Formato: <code>{link = texto}</code>\n\n"
-            "Exemplo:\n"
-            "<code>Olá {link = clique aqui} tudo certo {link = me responde}</code>",
+            "Envie a mensagem usando a formatação do Telegram:\n"
+            "• Use <b>negrito</b>, <i>itálico</i>, <u>sublinhado</u>, etc.\n"
+            "• Use <b>Inserir Link</b> (hiperlink) no próprio texto.\n\n"
+            "O bot identificará todos os links e a formatação automaticamente! ✅",
             parse_mode='HTML'
         )
     
@@ -894,10 +894,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             "📝 <b>Adicionar Template</b>\n\n"
-            "Envie a mensagem com variáveis de link:\n"
-            "Formato: <code>{link = texto}</code>\n\n"
-            "Exemplo:\n"
-            "<code>Olá {link = clique aqui} tudo certo {link = me responde}</code>",
+            "Envie a mensagem usando a formatação do Telegram:\n"
+            "• Use <b>negrito</b>, <i>itálico</i>, <u>sublinhado</u>, etc.\n"
+            "• Use <b>Inserir Link</b> (hiperlink) no próprio texto.\n\n"
+            "O bot identificará todos os links e a formatação automaticamente! ✅",
             parse_mode='HTML'
         )
     
