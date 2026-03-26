@@ -1,0 +1,1 @@
+from .handlers import handle_deletar_canal_callback
