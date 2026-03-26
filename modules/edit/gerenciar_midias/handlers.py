@@ -8,6 +8,7 @@ from db_helpers import (
     create_media_group, update_media_group, add_media_to_group,
     get_templates_by_canal, get_template, get_global_buttons
 )
+from modules.ui import mostrar_menu_edicao
 
 logger = logging.getLogger(__name__)
 
@@ -195,12 +196,7 @@ async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 'medias_temporarias']:
         context.user_data.pop(key, None)
     
-    keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Canal", callback_data=f"editar_canal_{canal_id}")]]
-    await update.message.reply_text(
-        f"✅ <b>Grupo criado!</b>\n\nID: {group_id}\nMídias: {len(medias_temp)}",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML'
-    )
+    await mostrar_menu_edicao(update.message, context, extra_text=f"✅ <b>Grupo criado!</b>\n\nID: {group_id}\nMídias: {len(medias_temp)}")
 
 async def handle_edit_media_callback(query, context, media_handler, db):
     """Handlers de callback para mídias"""
@@ -316,7 +312,8 @@ async def handle_edit_media_input(update: Update, context: ContextTypes.DEFAULT_
             canal_id=canal_id
         )
         await add_media_to_group(group_id, media_id, ordem=1)
-        await update.message.reply_text(f"✅ Mídia salva! ID: {group_id}")
+        for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia']: context.user_data.pop(key, None)
+        await mostrar_menu_edicao(update.message, context, extra_text=f"✅ Mídia salva! ID: {group_id}")
     else:
         medias = context.user_data.get('medias_temporarias', [])
         if len(medias) >= 10:

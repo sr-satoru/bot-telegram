@@ -1,6 +1,7 @@
 import os
 import logging
 from datetime import datetime
+import re
 from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -82,3 +83,11 @@ def require_super_admin(func):
                 await update.message.reply_text(message_text)
                 
     return wrapper
+
+def strip_html_tags(text: str) -> str:
+    """Remove todas as tags HTML de uma string"""
+    if not text:
+        return ""
+    # Remove tags HTML simples
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)

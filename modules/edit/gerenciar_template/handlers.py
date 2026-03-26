@@ -1,81 +1,27 @@
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 from db_helpers import (
     get_template_with_link_ids, update_link, update_all_links, 
     get_link_info, save_template, save_inline_buttons, 
     get_inline_buttons, delete_inline_button, get_inline_button_info, 
     get_global_buttons, update_media_group, get_canal,
-    delete_template
+    delete_template, get_templates_by_canal, get_template
+)
+from modules.utils import strip_html_tags
+from .ui import (
+    mostrar_lista_templates, mostrar_preview_template, 
+    mostrar_painel_edicao_links, mostrar_confirmacao_delecao,
+    mostrar_menu_tipo_link_geral, mostrar_prompt_criacao_template,
+    mostrar_escolha_link_template, mostrar_prompt_link_estatico,
+    mostrar_prompt_edicao_global, mostrar_prompt_mudar_link_canal,
+    mostrar_erro_template
 )
 from modules.buton_global.handlers import handle_global_button_callback, handle_global_button_message
 
 logger = logging.getLogger(__name__)
 
-async def show_edit_panel(query_or_message, template_id: int, context, success_message: str = None):
-    """Mostra o painel de edição de links de um template"""
-    template = await get_template_with_link_ids(template_id)
-    
-    if not template:
-        if hasattr(query_or_message, 'edit_message_text'):
-            await query_or_message.edit_message_text("❌ Template não encontrado.")
-        else:
-            await query_or_message.reply_text("❌ Template não encontrado.")
-        return
-
-    links = template['links']
-    inline_buttons = await get_inline_buttons(template_id)
-    
-    mensagem = f"🔧 <b>Configuração de Links - ID: {template_id}</b>\n\n"
-    if success_message:
-        mensagem += f"{success_message}\n\n"
-        
-    mensagem += "📄 <b>Texto:</b>\n"
-    template_msg = template['template_mensagem']
-    preview = template_msg[:100] + "..." if len(template_msg) > 100 else template_msg
-    mensagem += f"<i>{preview}</i>\n\n"
-    
-    mensagem += f"🔗 <b>Segmentos identificados ({len(links)}):</b>\n"
-    
-    keyboard = []
-    
-    # Links dinâmicos
-    for link_id, segmento, url, ordem in links:
-        url_display = url if len(url) <= 30 else url[:27] + "..."
-        mensagem += f"{ordem}. '{segmento}'\n   → {url_display}\n\n"
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ Editar {ordem}", callback_data=f"edit_link_{link_id}")
-        ])
-    
-    # Botões inline individuais
-    if inline_buttons:
-        mensagem += "\n🔘 <b>Botões Inline:</b>\n"
-        for i, button in enumerate(inline_buttons, 1):
-            url_display = button['url'] if len(button['url']) <= 30 else button['url'][:27] + "..."
-            mensagem += f"{i}. '{button['text']}' → {url_display}\n"
-            keyboard.append([
-                InlineKeyboardButton(f"✏️ Botão {i}", callback_data=f"edit_inline_button_{button['id']}"),
-                InlineKeyboardButton("🗑️", callback_data=f"deletar_inline_button_{button['id']}")
-            ])
-            
-    keyboard.append([
-        InlineKeyboardButton("➕ Adicionar Botão Inline", callback_data=f"adicionar_inline_button_{template_id}")
-    ])
-    
-    keyboard.append([
-        InlineKeyboardButton("🔄 Mudar Todos os Links", callback_data=f"edit_all_{template_id}")
-    ])
-    
-    keyboard.append([
-        InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates"),
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if hasattr(query_or_message, 'edit_message_text'):
-        await query_or_message.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
-    else:
-        await query_or_message.reply_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+# A função show_edit_panel foi movida para ui.py
 
 async def handle_edit_template_callback(query, context, parser):
     """Handlers de callback para gerenciamento de templates"""
@@ -88,54 +34,11 @@ async def handle_edit_template_callback(query, context, parser):
         canal_id = dados.get('canal_id')
         
         if not canal_id:
-            await query.edit_message_text("❌ Erro: canal não encontrado.", parse_mode='HTML')
+            await mostrar_erro_template(query, "Erro: canal não encontrado.")
             return True
         
         templates = await get_templates_by_canal(canal_id)
-        
-        if not templates:
-            keyboard = [
-                [InlineKeyboardButton("➕ Adicionar Template", callback_data=f"adicionar_template_{canal_id}")],
-                [InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "📝 <b>Gerenciar Templates</b>\n\n❌ Nenhum template encontrado.",
-                reply_markup=reply_markup,
-                parse_mode='HTML'
-            )
-            return True
-        
-        mensagem = f"📝 <b>Gerenciar Templates</b>\n\n"
-        mensagem += f"Total: {len(templates)} template(s)\n\n"
-        
-        keyboard = []
-        for template in templates:
-            template_id = template['id']
-            template_msg = template['template_mensagem']
-            preview = template_msg[:25] + "..." if len(template_msg) > 25 else template_msg
-            keyboard.append([
-                InlineKeyboardButton(f"📄 {preview}", callback_data=f"edit_template_{template_id}"),
-                InlineKeyboardButton("👁️ Preview", callback_data=f"preview_template_{template_id}")
-            ])
-            keyboard.append([
-                InlineKeyboardButton("🗑️ Deletar", callback_data=f"deletar_template_{template_id}")
-            ])
-        
-        keyboard.append([
-            InlineKeyboardButton("➕ Adicionar Template", callback_data=f"adicionar_template_{canal_id}")
-        ])
-        
-        keyboard.append([
-            InlineKeyboardButton("🔗 Mudar link geral", callback_data=f"mudar_link_geral_canal_{canal_id}")
-        ])
-        
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
-        ])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        await mostrar_lista_templates(query, templates, canal_id, context)
         return True
 
     elif data.startswith("preview_template_"):
@@ -144,7 +47,7 @@ async def handle_edit_template_callback(query, context, parser):
         template = await get_template(template_id)
         
         if not template:
-            await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
+            await mostrar_erro_template(query)
             return True
         
         template_mensagem = template['template_mensagem']
@@ -152,62 +55,12 @@ async def handle_edit_template_callback(query, context, parser):
         inline_buttons = template.get('inline_buttons', [])
         canal_id = template.get('canal_id')
         
-        # Busca botões globais do canal
         global_buttons = []
         if canal_id:
             global_buttons = await get_global_buttons(canal_id)
         
-        # Converte para formato de tuplas (segmento, link_url)
-        links_tuples = [(link['segmento'], link['link']) for link in links]
-        
-        # Formata a mensagem com links HTML
-        formatted_message = parser.format_message_with_links(template_mensagem, links_tuples)
-        
-        # Monta mensagem com informações
-        preview_text = f"👁️ <b>Preview - Template ID: {template_id}</b>\n\n"
-        preview_text += f"📄 <b>Mensagem formatada:</b>\n\n"
-        preview_text += formatted_message
-        
-        # Cria botões inline para preview (globais + individuais)
-        preview_keyboard = []
-        all_buttons = []
-        
-        # Adiciona botões globais primeiro
-        if global_buttons:
-            preview_text += f"\n\n🔘 <b>Botões Globais ({len(global_buttons)}):</b>\n"
-            for button in global_buttons:
-                preview_text += f"• 🌐 {button['text']} → {button['url'][:30]}...\n"
-                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
-        
-        # Adiciona botões individuais do template
-        if inline_buttons:
-            preview_text += f"\n🔘 <b>Botões do Template ({len(inline_buttons)}):</b>\n"
-            for button in inline_buttons:
-                preview_text += f"• {button['text']} → {button['url'][:30]}...\n"
-                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
-        
-        # Organiza botões em linhas (2 por linha)
-        if all_buttons:
-            button_row = []
-            for button in all_buttons:
-                button_row.append(button)
-                if len(button_row) >= 2:
-                    preview_keyboard.append(button_row)
-                    button_row = []
-            if button_row:
-                preview_keyboard.append(button_row)
-        
-        # Botões de navegação
-        nav_buttons = [
-            InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates"),
-            InlineKeyboardButton("✏️ Editar", callback_data=f"edit_template_{template_id}")
-        ]
-        preview_keyboard.append(nav_buttons)
-        
-        reply_markup = InlineKeyboardMarkup(preview_keyboard)
-        await query.edit_message_text(preview_text, reply_markup=reply_markup, parse_mode='HTML')
+        await mostrar_preview_template(query, template, global_buttons, parser, context)
         return True
-
     elif data.startswith("adicionar_template_"):
         # Inicia criação de novo template para o canal
         canal_id = int(data.split("_")[-1])
@@ -215,14 +68,15 @@ async def handle_edit_template_callback(query, context, parser):
         context.user_data['canal_id_template'] = canal_id
         context.user_data['etapa'] = 'template_mensagem'
         
-        await query.edit_message_text(
-            "📝 <b>Adicionar Template</b>\n\n"
-            "Envie a mensagem usando a formatação do Telegram:\n"
-            "• Use <b>negrito</b>, <i>itálico</i>, <u>sublinhado</u>, etc.\n"
-            "• Use <b>Inserir Link</b> (hiperlink) no próprio texto.\n\n"
-            "O bot identificará todos os links e a formatação automaticamente! ✅",
-            parse_mode='HTML'
-        )
+        # Garante que 'editando' tenha o canal_id para o retorno ao menu
+        if 'editando' not in context.user_data:
+            canal = await get_canal(canal_id)
+            context.user_data['editando'] = {
+                'canal_id': canal_id, 'nome': canal['nome'], 
+                'ids': canal['ids'].copy(), 'horarios': canal['horarios'].copy()
+            }
+        
+        await mostrar_prompt_criacao_template(query)
         return True
 
     elif data.startswith("deletar_template_"):
@@ -231,59 +85,50 @@ async def handle_edit_template_callback(query, context, parser):
         template = await get_template(template_id)
         
         if not template:
-            await query.edit_message_text("❌ Template não encontrado.", parse_mode='HTML')
+            await mostrar_erro_template(query)
             return True
         
         template_msg = template['template_mensagem']
-        preview = template_msg[:40] + "..." if len(template_msg) > 40 else template_msg
-        
-        mensagem = f"🗑️ <b>Deletar Template?</b>\n\n"
-        mensagem += f"📝 ID: {template_id}\n"
-        mensagem += f"📄 {preview}\n\n"
-        mensagem += "⚠️ Esta ação não pode ser desfeita!"
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Confirmar", callback_data=f"confirmar_deletar_template_{template_id}"),
-                InlineKeyboardButton("❌ Cancelar", callback_data="edit_templates")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        # Strip tags before slicing to avoid unclosed HTML tags
+        clean_text = strip_html_tags(template_msg)
+        preview = clean_text[:40] + "..." if len(clean_text) > 40 else clean_text
+        await mostrar_confirmacao_delecao(query, template_id, preview)
         return True
 
     elif data.startswith("confirmar_deletar_template_"):
         template_id = int(data.split("_")[-1])
+        
+        # Busca canal_id ANTES de deletar para poder voltar à lista
+        canal_id = context.user_data.get('editando', {}).get('canal_id')
+        if not canal_id:
+            t = await get_template(template_id)
+            canal_id = t['canal_id'] if t else None
+            
         deleted = await delete_template(template_id)
         if deleted:
-            await query.answer("✅ Template deletado!")
-            # Volta para lista
-            query.data = "edit_templates"
-            await handle_edit_template_callback(query, context, parser)
+            await query.answer("✅ Template deletado!", show_alert=True)
+            if canal_id:
+                templates = await get_templates_by_canal(canal_id)
+                await mostrar_lista_templates(query, templates, canal_id, context)
+            else:
+                await query.edit_message_text("✅ Template deletado. Volte ao menu principal.")
         else:
-            await query.edit_message_text("❌ Erro ao deletar template.")
+            await mostrar_erro_template(query, "Erro ao deletar template.")
         return True
 
     elif data.startswith("edit_template_"):
         template_id = int(data.split("_")[-1])
-        await show_edit_panel(query, template_id, context)
+        template = await get_template_with_link_ids(template_id)
+        if not template: return True
+        inline_buttons = await get_inline_buttons(template_id)
+        await mostrar_painel_edicao_links(query, template, inline_buttons, context)
         return True
 
     elif data.startswith("mudar_link_geral_canal_"):
         canal_id = int(data.split("_")[-1])
         templates = await get_templates_by_canal(canal_id)
         num_templates = len(templates)
-        mensagem = "🔄 <b>Mudar Link Geral do Canal</b>\n\n"
-        mensagem += f"⚠️ Esta ação afetará <b>TODOS os {num_templates} template(s)</b> do canal.\n\n"
-        mensagem += "Escolha como os links devem ser alterados:\n"
-        keyboard = [
-            [InlineKeyboardButton("🌐 Link global", callback_data=f"mudar_link_global_canal_{canal_id}")],
-            [InlineKeyboardButton("🤖 Link de bot", callback_data=f"mudar_link_bot_canal_{canal_id}")],
-            [InlineKeyboardButton("🔗 Link externo", callback_data=f"mudar_link_externo_canal_{canal_id}")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+        await mostrar_menu_tipo_link_geral(query, canal_id, num_templates)
         return True
 
     elif data.startswith(("mudar_link_global_canal_", "mudar_link_bot_canal_", "mudar_link_externo_canal_")):
@@ -291,15 +136,13 @@ async def handle_edit_template_callback(query, context, parser):
         context.user_data['mudando_link_canal_id'] = canal_id
         if "global" in data:
             context.user_data['mudando_link_global_canal'] = True
-            msg = "🌐 <b>Link Global do Canal</b>\n\nEnvie o novo link que substituirá TODOS os links:"
+            await mostrar_prompt_mudar_link_canal(query, 'global')
         elif "bot" in data:
             context.user_data['mudando_link_bot_canal'] = True
-            msg = "🤖 <b>Link de Bot do Canal</b>\n\nEnvie o novo link do bot (ex: https://t.me/meubot):"
+            await mostrar_prompt_mudar_link_canal(query, 'bot')
         else:
             context.user_data['mudando_link_externo_canal'] = True
-            msg = "🔗 <b>Link Externo do Canal</b>\n\nEnvie o novo link que substituirá os links externos:"
-            
-        await query.edit_message_text(msg, parse_mode='HTML')
+            await mostrar_prompt_mudar_link_canal(query, 'externo')
         return True
 
     elif data.startswith("edit_all_"):
@@ -309,7 +152,46 @@ async def handle_edit_template_callback(query, context, parser):
         context.user_data['editing_all_links'] = True
         context.user_data['editing_template_id'] = template_id
         context.user_data['editing_num_links'] = len(template['links'])
-        await query.edit_message_text(f"🔗 <b>Edição Global</b>\n\nEnvie o novo URL para todos os segmentos:", parse_mode='HTML')
+        await mostrar_prompt_edicao_global(query, len(template['links']))
+        return True
+
+    elif data == "confirmar_salvar_estatico":
+        parsed = context.user_data.get('pending_template')
+        canal_id = context.user_data.get('canal_id_template')
+        if not parsed or not canal_id: return True
+        tid = await save_template(canal_id, parsed['template_mensagem'], [])
+        for key in ['criando_template', 'etapa', 'pending_template', 'canal_id_template']: context.user_data.pop(key, None)
+        await query.answer("✅ Template estático salvo!", show_alert=True)
+        templates = await get_templates_by_canal(canal_id)
+        await mostrar_lista_templates(query, templates, canal_id, context)
+        return True
+
+    elif data == "link_choice_keep":
+        parsed = context.user_data.get('pending_template')
+        canal_id = context.user_data.get('canal_id_template')
+        if not parsed or not canal_id: return True
+        # Usa links originais capturados
+        links = [(seg, url) for seg, url in zip(parsed['segmentos'], parsed['urls_originais'])]
+        tid = await save_template(canal_id, parsed['template_mensagem'], links)
+        for key in ['criando_template', 'etapa', 'pending_template', 'canal_id_template']: context.user_data.pop(key, None)
+        await query.answer("✅ Template salvo com links originais!", show_alert=True)
+        templates = await get_templates_by_canal(canal_id)
+        await mostrar_lista_templates(query, templates, canal_id, context)
+        return True
+
+    elif data == "link_choice_same":
+        context.user_data['use_same_link'] = True
+        context.user_data['etapa'] = 'recebendo_link'
+        await query.edit_message_text("🔗 Envie o link único que será usado em todos os segmentos:", parse_mode='HTML')
+        return True
+
+    elif data == "link_choice_separate":
+        context.user_data['use_same_link'] = False
+        context.user_data['etapa'] = 'recebendo_link'
+        context.user_data['current_link_index'] = 0
+        context.user_data['links_received'] = []
+        parsed = context.user_data.get('pending_template')
+        await query.edit_message_text(f"🔗 Envie o link para '{parsed['segmentos'][0]}':", parse_mode='HTML')
         return True
 
     # Botões Globais delegados para modules.buton_global
@@ -335,15 +217,9 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
             user_data['original_message'] = message_html
             
             if parsed['num_links'] == 0:
-                keyboard = [[InlineKeyboardButton("✅ Salvar", callback_data="confirmar_salvar_estatico")]]
-                await update.message.reply_text("📝 Template estático detectado. Salvar?", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+                await mostrar_prompt_link_estatico(update.message)
             else:
-                keyboard = [
-                    [InlineKeyboardButton("✅ Manter Originais", callback_data="link_choice_keep")],
-                    [InlineKeyboardButton("🔗 Mesmo link para todos", callback_data="link_choice_same")],
-                    [InlineKeyboardButton("🔗 Separados", callback_data="link_choice_separate")]
-                ]
-                await update.message.reply_text(f"✅ Localizei {parsed['num_links']} links. O que deseja fazer?", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+                await mostrar_escolha_link_template(update.message, parsed['num_links'])
             return True
             
         elif etapa == 'recebendo_link':
@@ -356,8 +232,9 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
             if user_data.get('use_same_link'):
                 links = [(seg, message_text.strip()) for seg in parsed['segmentos']]
                 tid = await save_template(canal_id, parsed['template_mensagem'], links)
-                await update.message.reply_text(f"✅ Template salvo! ID: {tid}")
                 for key in ['criando_template', 'etapa', 'pending_template', 'use_same_link']: user_data.pop(key, None)
+                templates = await get_templates_by_canal(canal_id)
+                await mostrar_lista_templates(update.message, templates, canal_id, context, extra_text=f"✅ Template salvo! ID: {tid}")
             else:
                 idx = user_data.get('current_link_index', 0)
                 user_data['links_received'].append((parsed['segmentos'][idx], message_text.strip()))
@@ -368,8 +245,9 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
                     await update.message.reply_text(f"🔗 Envie o link para '{parsed['segmentos'][idx]}':")
                 else:
                     tid = await save_template(canal_id, parsed['template_mensagem'], user_data['links_received'])
-                    await update.message.reply_text(f"✅ Todos os links recebidos! Template ID: {tid}")
                     for key in ['criando_template', 'etapa', 'pending_template', 'links_received', 'current_link_index']: user_data.pop(key, None)
+                    templates = await get_templates_by_canal(canal_id)
+                    await mostrar_lista_templates(update.message, templates, canal_id, context, extra_text=f"✅ Todos os links recebidos! ID: {tid}")
             return True
 
     # Fluxo de Edição
@@ -386,7 +264,10 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
             btns_list.append((user_data['inline_button_text'], url))
             await save_inline_buttons(tid, btns_list)
             for key in ['adicionando_inline_button', 'inline_button_template_id', 'inline_button_etapa', 'inline_button_text']: user_data.pop(key, None)
-            await show_edit_panel(update.message, tid, context, "✅ Botão adicionado!")
+            inline_buttons = await get_inline_buttons(tid)
+            template = await get_template_with_link_ids(tid)
+            # Retorna ao painel de edição do template ao invés do menu do canal (melhor UX para botões)
+            await mostrar_painel_edicao_links(update.message, template, inline_buttons, context, success_message="✅ Botão adicionado!")
         return True
 
     if user_data.get('editando_inline_button'):
@@ -403,14 +284,17 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
             btns_list.append((user_data['inline_button_new_text'], url))
             await save_inline_buttons(tid, btns_list)
             for key in ['editando_inline_button', 'inline_button_id', 'inline_button_template_id', 'inline_button_etapa', 'inline_button_new_text']: user_data.pop(key, None)
-            await show_edit_panel(update.message, tid, context, "✅ Botão atualizado!")
+            inline_buttons = await get_inline_buttons(tid)
+            template = await get_template_with_link_ids(tid)
+            await mostrar_painel_edicao_links(update.message, template, inline_buttons, context, success_message="✅ Botão atualizado!")
         return True
 
     if 'editing_all_links' in user_data:
         tid = user_data['editing_template_id']
         await update_all_links(tid, message_text.strip())
         for key in ['editing_all_links', 'editing_template_id', 'editing_num_links']: user_data.pop(key, None)
-        await show_edit_panel(update.message, tid, context, "✅ Todos os links atualizados!")
+        templates = await get_templates_by_canal(canal_id)
+        await mostrar_lista_templates(update.message, templates, canal_id, context, extra_text="✅ Todos os links atualizados!")
         return True
 
     if 'editing_link_id' in user_data:
@@ -418,25 +302,23 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
         tid = user_data['editing_template_id']
         await update_link(lid, message_text.strip())
         for key in ['editing_link_id', 'editing_template_id', 'editing_segmento', 'editing_ordem']: user_data.pop(key, None)
-        await show_edit_panel(update.message, tid, context, "✅ Link atualizado!")
-      # Fluxo de Mudar Link Global Canal
+        canal_id = context.user_data.get('editando', {}).get('canal_id')
+        templates = await get_templates_by_canal(canal_id)
+        await mostrar_lista_templates(update.message, templates, canal_id, context, extra_text="✅ Link atualizado!")
+        return True
+
+    # Fluxo de Mudar Link Global Canal
     if 'mudando_link_global_canal' in user_data:
         cid = user_data['mudando_link_canal_id']
         templates = await get_templates_by_canal(cid)
         for t in templates: await update_all_links(t['id'], message_text.strip())
         user_data.pop('mudando_link_global_canal', None)
         user_data.pop('mudando_link_canal_id', None)
-        await update.message.reply_text("✅ Todos os links atualizados!")
-        return True
-
-    # Botões Globais delegados ao módulo modules.buton_global
-    if await handle_global_button_message(update, context):
+        templates = await get_templates_by_canal(cid)
+        await mostrar_lista_templates(update.message, templates, cid, context, extra_text="✅ Todos os links atualizados!")
         return True
 
     if 'mudando_link_bot_canal' in user_data:
-        # A lógica completa de bot canal é longa, vou simplificar ou mover a parte de auxílio
-        # Para preguiça do bot assistant, vou manter a lógica de loop aqui se for viável
-        # Mas o usuário quer modularizar, então movemos a lógica completa.
         cid = user_data['mudando_link_canal_id']
         new_bot_url = message_text.strip()
         if 't.me/' not in new_bot_url:
@@ -453,7 +335,8 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
                     await update_link(lid, new_url)
         user_data.pop('mudando_link_bot_canal', None)
         user_data.pop('mudando_link_canal_id', None)
-        await update.message.reply_text("✅ Links de bot atualizados em todo o canal!")
+        templates = await get_templates_by_canal(cid)
+        await mostrar_lista_templates(update.message, templates, cid, context, extra_text="✅ Links de bot atualizados!")
         return True
 
     if 'mudando_link_externo_canal' in user_data:
@@ -467,7 +350,12 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
                     await update_link(lid, new_url)
         user_data.pop('mudando_link_externo_canal', None)
         user_data.pop('mudando_link_canal_id', None)
-        await update.message.reply_text("✅ Links externos atualizados em todo o canal!")
+        templates = await get_templates_by_canal(cid)
+        await mostrar_lista_templates(update.message, templates, cid, context, extra_text="✅ Links externos atualizados!")
+        return True
+
+    # Botões Globais delegados ao módulo modules.buton_global
+    if await handle_global_button_message(update, context):
         return True
 
     return False
