@@ -98,7 +98,7 @@ class MediaHandler:
                                caption: Optional[str] = None,
                                parse_mode: str = 'HTML',
                                reply_markup: Optional[InlineKeyboardMarkup] = None,
-                               bot=None) -> bool:
+                               bot=None, **kwargs) -> bool:
         """Envia um grupo de mídias para um chat"""
         try:
             if bot:
@@ -246,7 +246,7 @@ class MediaHandler:
                                              template: Optional[Dict] = None,
                                              global_buttons: Optional[List[Dict]] = None,
                                              use_auto_template: bool = True,
-                                             bot=None) -> bool:
+                                             bot=None, **kwargs) -> bool:
         """Envia um grupo de mídias com template e botões aplicados"""
         if not template and use_auto_template:
             auto_template = await self.get_auto_template(media_group)
