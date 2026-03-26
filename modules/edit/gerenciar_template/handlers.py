@@ -17,7 +17,10 @@ from .ui import (
     mostrar_prompt_edicao_global, mostrar_prompt_mudar_link_canal,
     mostrar_erro_template
 )
-from modules.buton_global.handlers import handle_global_button_callback, handle_global_button_message
+from modules.buton_global.handlers import (
+    handle_global_button_callback, handle_global_button_message,
+    handle_template_button_callback, handle_any_button_message
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +197,10 @@ async def handle_edit_template_callback(query, context, parser):
         await query.edit_message_text(f"🔗 Envie o link para '{parsed['segmentos'][0]}':", parse_mode='HTML')
         return True
 
+    # Botões Inline (Template) delegados para modules.buton_global
+    if await handle_template_button_callback(query, context):
+        return True
+
     # Botões Globais delegados para modules.buton_global
     if await handle_global_button_callback(query, context):
         return True
@@ -251,43 +258,7 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
             return True
 
     # Fluxo de Edição
-    if user_data.get('adicionando_inline_button'):
-        tid = user_data['inline_button_template_id']
-        if user_data['inline_button_etapa'] == 'texto':
-            user_data['inline_button_text'] = message_text.strip()
-            user_data['inline_button_etapa'] = 'url'
-            await update.message.reply_text("✅ Texto salvo. Envie o URL:")
-        else:
-            url = message_text.strip()
-            btns = await get_inline_buttons(tid)
-            btns_list = [(b['text'], b['url']) for b in btns]
-            btns_list.append((user_data['inline_button_text'], url))
-            await save_inline_buttons(tid, btns_list)
-            for key in ['adicionando_inline_button', 'inline_button_template_id', 'inline_button_etapa', 'inline_button_text']: user_data.pop(key, None)
-            inline_buttons = await get_inline_buttons(tid)
-            template = await get_template_with_link_ids(tid)
-            # Retorna ao painel de edição do template ao invés do menu do canal (melhor UX para botões)
-            await mostrar_painel_edicao_links(update.message, template, inline_buttons, context, success_message="✅ Botão adicionado!")
-        return True
-
-    if user_data.get('editando_inline_button'):
-        bid = user_data['inline_button_id']
-        tid = user_data['inline_button_template_id']
-        if user_data['inline_button_etapa'] == 'texto':
-            user_data['inline_button_new_text'] = message_text.strip()
-            user_data['inline_button_etapa'] = 'url'
-            await update.message.reply_text("✅ Novo texto salvo. Envie o novo URL:")
-        else:
-            url = message_text.strip()
-            btns = await get_inline_buttons(tid)
-            btns_list = [(b['text'], b['url']) for b in btns if b['id'] != bid]
-            btns_list.append((user_data['inline_button_new_text'], url))
-            await save_inline_buttons(tid, btns_list)
-            for key in ['editando_inline_button', 'inline_button_id', 'inline_button_template_id', 'inline_button_etapa', 'inline_button_new_text']: user_data.pop(key, None)
-            inline_buttons = await get_inline_buttons(tid)
-            template = await get_template_with_link_ids(tid)
-            await mostrar_painel_edicao_links(update.message, template, inline_buttons, context, success_message="✅ Botão atualizado!")
-        return True
+    # Fluxos de botão agora são delegados completamente para handle_any_button_message
 
     if 'editing_all_links' in user_data:
         tid = user_data['editing_template_id']
@@ -354,8 +325,8 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
         await mostrar_lista_templates(update.message, templates, cid, context, extra_text="✅ Links externos atualizados!")
         return True
 
-    # Botões Globais delegados ao módulo modules.buton_global
-    if await handle_global_button_message(update, context):
+    # Botões Inline (Template e Globais) delegados ao módulo modules.buton_global
+    if await handle_any_button_message(update, context):
         return True
 
     return False

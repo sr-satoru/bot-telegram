@@ -112,11 +112,11 @@ async def mostrar_painel_edicao_links(obj, template, inline_buttons, context: Co
             url_display = button['url'] if len(button['url']) <= 30 else button['url'][:27] + "..."
             mensagem += f"{i}. '{button['text']}' → {url_display}\n"
             keyboard.append([
-                InlineKeyboardButton(f"✏️ Botão {i}", callback_data=f"edit_inline_button_{button['id']}"),
-                InlineKeyboardButton("🗑️", callback_data=f"deletar_inline_button_{button['id']}")
+                InlineKeyboardButton(f"✏️ Botão {i}", callback_data=f"edit_template_button_{button['id']}"),
+                InlineKeyboardButton("🗑️", callback_data=f"deletar_template_button_{button['id']}")
             ])
             
-    keyboard.append([InlineKeyboardButton("➕ Adicionar Botão Inline", callback_data=f"adicionar_inline_button_{template_id}")])
+    keyboard.append([InlineKeyboardButton("➕ Adicionar Botão Inline", callback_data=f"adicionar_template_button_{template_id}")])
     keyboard.append([InlineKeyboardButton("🔄 Mudar Todos os Links", callback_data=f"edit_all_{template_id}")])
     keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="edit_templates")])
     
