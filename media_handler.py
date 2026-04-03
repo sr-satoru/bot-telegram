@@ -284,7 +284,10 @@ class MediaHandler:
                     if hasattr(l, 'segmento_com_link'):
                         link_tuples.append((l.segmento_com_link, l.link_da_mensagem))
                     elif isinstance(l, dict):
-                        link_tuples.append((l.get('segmento_com_link', ''), l.get('link_da_mensagem', '')))
+                        # Suporte para chaves simplificadas (segmento/link) ou nomes do Prisma
+                        seg = l.get('segmento') or l.get('segmento_com_link', '')
+                        url = l.get('link') or l.get('link_da_mensagem', '')
+                        link_tuples.append((seg, url))
                     elif len(l) >= 3:
                         link_tuples.append((l[1], l[2]))
                 
