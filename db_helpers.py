@@ -225,11 +225,20 @@ async def get_link_info(link_id: int) -> Optional[Tuple]:
 # BOTÕES INLINE DO TEMPLATE
 # ──────────────────────────────────────────────
 
-async def save_inline_buttons(template_id: int, buttons: List[Tuple[str, str]]) -> bool:
+async def save_inline_buttons(template_id: int, buttons: List[Tuple]) -> bool:
+    """Aceita tuplas (text, url) ou (text, url, icon_emoji_id)"""
     await prisma.templateinlinebutton.delete_many(where={"template_id": template_id})
-    for i, (text, url) in enumerate(buttons):
+    for i, btn in enumerate(buttons):
+        text, url = btn[0], btn[1]
+        icon_emoji_id = btn[2] if len(btn) > 2 else None
         await prisma.templateinlinebutton.create(
-            data={"template_id": template_id, "button_text": text, "button_url": url, "ordem": i + 1}
+            data={
+                "template_id": template_id,
+                "button_text": text,
+                "button_url": url,
+                "ordem": i + 1,
+                "icon_emoji_id": icon_emoji_id,
+            }
         )
     return True
 
@@ -237,7 +246,13 @@ async def get_inline_buttons(template_id: int) -> List[Dict]:
     buttons = await prisma.templateinlinebutton.find_many(
         where={"template_id": template_id}, order={"ordem": "asc"}
     )
-    return [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in buttons]
+    return [
+        {
+            "id": b.id, "text": b.button_text, "url": b.button_url,
+            "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id,
+        }
+        for b in buttons
+    ]
 
 async def delete_inline_button(button_id: int) -> bool:
     result = await prisma.templateinlinebutton.delete_many(where={"id": button_id})
@@ -247,14 +262,19 @@ async def get_inline_button_info(button_id: int) -> Optional[Dict]:
     b = await prisma.templateinlinebutton.find_unique(where={"id": button_id})
     if not b:
         return None
-    return {"id": b.id, "template_id": b.template_id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status}
+    return {
+        "id": b.id, "template_id": b.template_id,
+        "text": b.button_text, "url": b.button_url,
+        "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id,
+    }
 
 async def update_inline_button(button_id: int, data: Dict) -> bool:
-    """Atualiza campos de um botão inline (text, url)"""
+    """Atualiza campos de um botão inline (text, url, icon_emoji_id)"""
     update_data = {}
     if "text" in data: update_data["button_text"] = data["text"]
     if "url" in data: update_data["button_url"] = data["url"]
-    
+    if "icon_emoji_id" in data: update_data["icon_emoji_id"] = data["icon_emoji_id"]
+
     result = await prisma.templateinlinebutton.update_many(
         where={"id": button_id},
         data=update_data
@@ -282,13 +302,28 @@ async def get_global_buttons(canal_id: int) -> List[Dict]:
     buttons = await prisma.canalglobalbutton.find_many(
         where={"canal_id": canal_id}, order={"ordem": "asc"}
     )
-    return [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in buttons]
+    return [
+        {
+            "id": b.id, "text": b.button_text, "url": b.button_url,
+            "ordem": b.ordem, "icon_emoji_id": b.icon_emoji_id
+        }
+        for b in buttons
+    ]
 
-async def save_global_buttons(canal_id: int, buttons: List[Tuple[str, str]]) -> bool:
+async def save_global_buttons(canal_id: int, buttons: List[Tuple]) -> bool:
+    """Aceita tuplas (text, url) ou (text, url, icon_emoji_id)"""
     await prisma.canalglobalbutton.delete_many(where={"canal_id": canal_id})
-    for i, (text, url) in enumerate(buttons):
+    for i, btn in enumerate(buttons):
+        text, url = btn[0], btn[1]
+        icon_emoji_id = btn[2] if len(btn) > 2 else None
         await prisma.canalglobalbutton.create(
-            data={"canal_id": canal_id, "button_text": text, "button_url": url, "ordem": i + 1}
+            data={
+                "canal_id": canal_id,
+                "button_text": text,
+                "button_url": url,
+                "ordem": i + 1,
+                "icon_emoji_id": icon_emoji_id,
+            }
         )
     return True
 
@@ -300,13 +335,17 @@ async def get_global_button_info(button_id: int) -> Optional[Dict]:
     b = await prisma.canalglobalbutton.find_unique(where={"id": button_id})
     if not b:
         return None
-    return {"id": b.id, "canal_id": b.canal_id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem}
+    return {
+        "id": b.id, "canal_id": b.canal_id, "text": b.button_text,
+        "url": b.button_url, "ordem": b.ordem, "icon_emoji_id": b.icon_emoji_id
+    }
 
 async def update_global_button(button_id: int, data: Dict) -> bool:
-    """Atualiza campos de um botão global (text, url)"""
+    """Atualiza campos de um botão global (text, url, icon_emoji_id)"""
     update_data = {}
     if "text" in data: update_data["button_text"] = data["text"]
     if "url" in data: update_data["button_url"] = data["url"]
+    if "icon_emoji_id" in data: update_data["icon_emoji_id"] = data["icon_emoji_id"]
     
     result = await prisma.canalglobalbutton.update_many(
         where={"id": button_id},

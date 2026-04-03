@@ -253,6 +253,7 @@ async def handle_edit_template_message(update: Update, context: ContextTypes.DEF
         canal_id = user_data.get('canal_id_template')
         
         if etapa == 'template_mensagem':
+            message_html = parser.convert_custom_emojis_to_html(update.message)
             parsed = parser.parse_and_save_template(message_html)
             user_data['pending_template'] = parsed
             user_data['original_message'] = message_html

@@ -1,5 +1,7 @@
 import re
+import html
 from typing import List, Tuple, Optional, Dict
+from telegram import Message, MessageEntity
 
 class MessageParser:
     """Parser para extrair links de mensagens HTML e formatar templates preservando tags do Telegram"""
@@ -50,6 +52,78 @@ class MessageParser:
             'urls_originais': urls_originais,
             'num_links': len(segmentos)
         }
+
+    @staticmethod
+    def convert_custom_emojis_to_html(message: Message) -> str:
+        """
+        Converte uma mensagem do Telegram em HTML, substituindo entidades por tags HTML.
+        Garante aninhamento correto e evita duplicações através de segmentação por offsets.
+        """
+        if not message:
+            return ""
+
+        text = message.text or message.caption or ""
+        entities = message.entities or message.caption_entities or []
+        
+        if not entities:
+            return html.escape(text)
+
+        # Pontos de interesse: offsets UTF-16 onde uma entidade começa ou termina
+        text_utf16 = text.encode('utf-16-le')
+        text_len_utf16 = len(text_utf16) // 2
+        
+        points = set([0, text_len_utf16])
+        for ent in entities:
+            points.add(ent.offset)
+            points.add(ent.offset + ent.length)
+        
+        sorted_points = sorted([p for p in points if 0 <= p <= text_len_utf16])
+        
+        html_out = ""
+        for i in range(len(sorted_points) - 1):
+            start = sorted_points[i]
+            end = sorted_points[i+1]
+            if start == end:
+                continue
+            
+            # Extrai o texto do segmento fielmente (UTF-16 safe)
+            segment_text = text_utf16[start*2 : end*2].decode('utf-16-le')
+            safe_text = html.escape(segment_text)
+            
+            # Entidades que cobrem este segmento específico
+            # Filtramos as que cobrem TOTALMENTE o intervalo [start, end]
+            segment_entities = [e for e in entities if e.offset <= start and (e.offset + e.length) >= end]
+            
+            # Ordena: entidades maiores (mais externas) primeiro
+            segment_entities.sort(key=lambda x: x.length, reverse=True)
+            
+            tagged_segment = safe_text
+            
+            # Aplica as tags das entidades do segmento (de dentro para fora)
+            # Para que a tag externa envolva as internas corretamente
+            for ent in reversed(segment_entities):
+                if ent.type == MessageEntity.CUSTOM_EMOJI:
+                    tagged_segment = f'<tg-emoji emoji-id="{ent.custom_emoji_id}">{tagged_segment}</tg-emoji>'
+                elif ent.type == MessageEntity.TEXT_LINK:
+                    tagged_segment = f'<a href="{ent.url}">{tagged_segment}</a>'
+                elif ent.type == MessageEntity.URL:
+                    tagged_segment = f'<a href="{html.escape(segment_text)}">{tagged_segment}</a>'
+                elif ent.type == MessageEntity.BOLD:
+                    tagged_segment = f'<b>{tagged_segment}</b>'
+                elif ent.type == MessageEntity.ITALIC:
+                    tagged_segment = f'<i>{tagged_segment}</i>'
+                elif ent.type == MessageEntity.UNDERLINE:
+                    tagged_segment = f'<u>{tagged_segment}</u>'
+                elif ent.type == MessageEntity.STRIKETHROUGH:
+                    tagged_segment = f'<s>{tagged_segment}</s>'
+                elif ent.type == MessageEntity.CODE:
+                    tagged_segment = f'<code>{tagged_segment}</code>'
+                elif ent.type == MessageEntity.PRE:
+                    tagged_segment = f'<pre>{tagged_segment}</pre>'
+            
+            html_out += tagged_segment
+            
+        return html_out
     
     @staticmethod
     def format_message_with_links(template_html: str, links: List[Tuple[str, str]]) -> str:

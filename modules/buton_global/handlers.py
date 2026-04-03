@@ -7,6 +7,7 @@ from .utils import (
     get_any_buttons, save_any_buttons, delete_any_button, get_any_button_info, update_any_button
 )
 from db_helpers import toggle_inline_button_status
+from telegram import MessageEntity
 
 async def handle_any_button_callback(query, context, owner_type='canal'):
     """Router genérico para callbacks de botões (canal ou template)"""
@@ -165,6 +166,9 @@ async def handle_any_button_message(update, context):
             await mostrar_menu_botoes(message, parent_id, owner_type, texto_extra="❌ Operação cancelada.")
         else:
             await notificar_sucesso(message, "cancelado")
+            
+        # Limpa dados temporários
+        user_data.pop('pending_emoji_id', None)
         return True
 
     # Fluxo unificado de ADICIONAR/EDITAR
@@ -182,7 +186,17 @@ async def handle_any_button_message(update, context):
             field = user_data.get('button_field')
             
             if field == 'text':
-                await update_any_button(button_id, {"text": text}, owner_type)
+                # Extração e validação de emoji premium para o ícone
+                entities = message.entities or message.caption_entities or []
+                custom_emojis = [e for e in entities if e.type == MessageEntity.CUSTOM_EMOJI]
+                
+                if len(custom_emojis) > 1:
+                    await message.reply_text("❌ Só é permitido <b>1 emoji premium</b> por botão.\nRemova os extras e tente novamente.", parse_mode='HTML')
+                    return True
+                
+                emoji_id = custom_emojis[0].custom_emoji_id if custom_emojis else None
+                
+                await update_any_button(button_id, {"text": text, "icon_emoji_id": emoji_id}, owner_type)
                 user_data.pop('button_etapa', None)
                 user_data.pop('button_field', None)
                 user_data.pop('editando_button', None)
@@ -202,7 +216,16 @@ async def handle_any_button_message(update, context):
         
         # --- FLUXO DE ADIÇÃO (EXISTENTE) ---
         if etapa == 'texto':
+            # Extração e validação de emoji premium para o ícone
+            entities = message.entities or message.caption_entities or []
+            custom_emojis = [e for e in entities if e.type == MessageEntity.CUSTOM_EMOJI]
+            
+            if len(custom_emojis) > 1:
+                await message.reply_text("❌ Só é permitido <b>1 emoji premium</b> por botão.\nRemova os extras e tente novamente.", parse_mode='HTML')
+                return True
+            
             user_data['button_text'] = text
+            user_data['pending_emoji_id'] = custom_emojis[0].custom_emoji_id if custom_emojis else None
             user_data['button_etapa'] = 'url'
             prefix = "global_button_tg" if owner_type == 'canal' else "fix_button_tg"
             await mostrar_prompt_url_botao(message, text, prefix=prefix, context=context)
@@ -214,17 +237,20 @@ async def handle_any_button_message(update, context):
                 return True
                 
             button_text = user_data.get('button_text')
+            emoji_id = user_data.get('pending_emoji_id')
             url = text
             
             # Busca lista atual para adicionar à ela
             current_buttons = await get_any_buttons(parent_id, owner_type)
-            updated_list = [(b['text'], b['url']) for b in current_buttons]
-            updated_list.append((button_text, url))
+            # Lista de tuplas (text, url, icon_emoji_id)
+            updated_list = [(b['text'], b['url'], b.get('icon_emoji_id')) for b in current_buttons]
+            updated_list.append((button_text, url, emoji_id))
             
             await save_any_buttons(parent_id, updated_list, owner_type)
             
             # Limpa tudo
-            params = ['adicionando_button', 'button_parent_id', 'button_owner_type', 'button_etapa', 'button_text']
+            params = ['adicionando_button', 'button_parent_id', 'button_owner_type', 
+                      'button_etapa', 'button_text', 'pending_emoji_id']
             for key in params: user_data.pop(key, None)
             
             await mostrar_menu_botoes(message, parent_id, owner_type, texto_extra="✅ Botão adicionado!")

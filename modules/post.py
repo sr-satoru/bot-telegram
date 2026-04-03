@@ -172,7 +172,13 @@ class MediaScheduler:
             "id": t.id, "canal_id": t.canal_id,
             "template_mensagem": t.template_mensagem,
             "links": [{"id": l.id, "segmento": l.segmento_com_link, "link": l.link_da_mensagem, "ordem": l.ordem} for l in t.links],
-            "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in t.inline_buttons],
+            "inline_buttons": [
+                {
+                    "id": b.id, "text": b.button_text, "url": b.button_url, 
+                    "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                } 
+                for b in t.inline_buttons
+            ],
         }
 
     async def _get_global_buttons(self, canal_id: int) -> List[Dict]:

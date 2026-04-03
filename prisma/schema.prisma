@@ -59,22 +59,24 @@ model TemplateLink {
 }
 
 model TemplateInlineButton {
-  id          Int      @id @default(autoincrement())
-  template_id Int
-  button_text String
-  button_url  String
-  ordem       Int
-  status      String   @default("ATIVO")
-  template    Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  id             Int      @id @default(autoincrement())
+  template_id    Int
+  button_text    String
+  button_url     String
+  ordem          Int
+  status         String   @default("ATIVO")
+  icon_emoji_id  String?  // ID do emoji premium para o ícone do botão
+  template       Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
 }
 
 model CanalGlobalButton {
-  id          Int    @id @default(autoincrement())
-  canal_id    Int
-  button_text String
-  button_url  String
-  ordem       Int
-  canal       Canal  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
+  id             Int    @id @default(autoincrement())
+  canal_id       Int
+  button_text    String
+  button_url     String
+  ordem          Int
+  icon_emoji_id  String? // ID do emoji premium para o ícone do botão
+  canal          Canal  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
 }
 
 model MediaGroup {

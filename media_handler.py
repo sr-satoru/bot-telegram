@@ -236,7 +236,13 @@ class MediaHandler:
             "canal_id": template.canal_id,
             "template_mensagem": template.template_mensagem,
             "links": [{"id": l.id, "segmento": l.segmento_com_link, "link": l.link_da_mensagem, "ordem": l.ordem} for l in template.links],
-            "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in template.inline_buttons],
+            "inline_buttons": [
+                {
+                    "id": b.id, "text": b.button_text, "url": b.button_url, 
+                    "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                } 
+                for b in template.inline_buttons
+            ],
         }
 
     async def send_media_group_with_template(self,
@@ -258,7 +264,10 @@ class MediaHandler:
                 where={"canal_id": media_group['canal_id']},
                 order={"ordem": "asc"}
             )
-            global_buttons = [{"id": b.id, "text": b.button_text, "url": b.button_url} for b in buttons_raw] or None
+            global_buttons = [
+                {"id": b.id, "text": b.button_text, "url": b.button_url, "icon_emoji_id": b.icon_emoji_id} 
+                for b in buttons_raw
+            ] or None
 
         caption = None
         all_buttons = []
@@ -285,11 +294,19 @@ class MediaHandler:
 
             for button in template.get('inline_buttons', []):
                 if button.get('status') == "ATIVO":
-                    all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
+                    all_buttons.append(InlineKeyboardButton(
+                        button['text'], 
+                        url=button['url'],
+                        icon_custom_emoji_id=button.get('icon_emoji_id')
+                    ))
 
         if global_buttons:
             for button in global_buttons:
-                all_buttons.append(InlineKeyboardButton(button['text'], url=button['url']))
+                all_buttons.append(InlineKeyboardButton(
+                    button['text'], 
+                    url=button['url'],
+                    icon_custom_emoji_id=button.get('icon_emoji_id')
+                ))
 
         reply_markup = None
         if all_buttons:
