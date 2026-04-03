@@ -66,6 +66,7 @@ model TemplateInlineButton {
   ordem          Int
   status         String   @default("ATIVO")
   icon_emoji_id  String?  // ID do emoji premium para o ícone do botão
+  button_style   String?  // Estilo do botão (primary, success, danger)
   template       Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
 }
 
@@ -76,6 +77,7 @@ model CanalGlobalButton {
   button_url     String
   ordem          Int
   icon_emoji_id  String? // ID do emoji premium para o ícone do botão
+  button_style   String? // Estilo do botão (primary, success, danger)
   canal          Canal  @relation(fields: [canal_id], references: [id], onDelete: Cascade)
 }
 

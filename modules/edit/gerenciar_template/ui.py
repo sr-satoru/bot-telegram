@@ -54,17 +54,31 @@ async def mostrar_preview_template(obj, template, global_buttons, parser, contex
     preview_keyboard = []
     all_buttons = []
     
+    style_map = {"primary": "🔵", "success": "🟢", "danger": "🔴", "default": "⚪"}
+    
     if global_buttons:
         preview_text += f"\n\n🔘 <b>Botões Globais ({len(global_buttons)}):</b>\n"
         for button in global_buttons:
-            preview_text += f"• 🌐 {button['text']} → {button['url'][:30]}...\n"
-            all_buttons.append(InlineKeyboardButton(button['text'], url=button['url'], icon_custom_emoji_id=button.get('icon_emoji_id')))
+            style_icon = style_map.get(button.get('style'), "⚪")
+            preview_text += f"• {style_icon} {button['text']} → {button['url'][:30]}...\n"
+            all_buttons.append(InlineKeyboardButton(
+                button['text'], 
+                url=button['url'], 
+                icon_custom_emoji_id=button.get('icon_emoji_id'),
+                style=button.get('style')
+            ))
     
     if inline_buttons:
         preview_text += f"\n🔘 <b>Botões do Template ({len(inline_buttons)}):</b>\n"
         for button in inline_buttons:
-            preview_text += f"• {button['text']} → {button['url'][:30]}...\n"
-            all_buttons.append(InlineKeyboardButton(button['text'], url=button['url'], icon_custom_emoji_id=button.get('icon_emoji_id')))
+            style_icon = style_map.get(button.get('style'), "⚪")
+            preview_text += f"• {style_icon} {button['text']} → {button['url'][:30]}...\n"
+            all_buttons.append(InlineKeyboardButton(
+                button['text'], 
+                url=button['url'], 
+                icon_custom_emoji_id=button.get('icon_emoji_id'),
+                style=button.get('style')
+            ))
             
     if all_buttons:
         row = []

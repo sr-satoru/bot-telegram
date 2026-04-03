@@ -239,7 +239,8 @@ class MediaHandler:
             "inline_buttons": [
                 {
                     "id": b.id, "text": b.button_text, "url": b.button_url, 
-                    "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                    "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id,
+                    "style": b.button_style
                 } 
                 for b in template.inline_buttons
             ],
@@ -300,7 +301,8 @@ class MediaHandler:
                     all_buttons.append(InlineKeyboardButton(
                         button['text'], 
                         url=button['url'],
-                        icon_custom_emoji_id=button.get('icon_emoji_id')
+                        icon_custom_emoji_id=button.get('icon_emoji_id'),
+                        style=button.get('style')
                     ))
 
         if global_buttons:
@@ -308,7 +310,8 @@ class MediaHandler:
                 all_buttons.append(InlineKeyboardButton(
                     button['text'], 
                     url=button['url'],
-                    icon_custom_emoji_id=button.get('icon_emoji_id')
+                    icon_custom_emoji_id=button.get('icon_emoji_id'),
+                    style=button.get('style')
                 ))
 
         reply_markup = None

@@ -16,9 +16,11 @@ async def mostrar_menu_botoes(obj, parent_id, owner_type='canal', texto_extra=""
         mensagem += f"<b>Botões configurados ({len(buttons)}):</b>\n"
         for i, button in enumerate(buttons, 1):
             url_display = button['url'] if len(button['url']) <= 40 else button['url'][:37] + "..."
-            status_icon = "🟢" if button.get('status') == "ATIVO" else "🔴"
-            status_text = f" ({status_icon})" if owner_type == 'template' else ""
-            mensagem += f"{i}. '{button['text']}'{status_text}\n   → {url_display}\n\n"
+            style_map = {"primary": "🔵", "success": "🟢", "danger": "🔴", "default": "⚪"}
+            style_icon = style_map.get(button.get('style'), "⚪")
+            status_dot = "🟢" if button.get('status') == "ATIVO" else "🔴"
+            status_text = f" ({status_dot})" if owner_type == 'template' else ""
+            mensagem += f"{i}. {style_icon} '{button['text']}'{status_text}\n   → {url_display}\n\n"
     else:
         mensagem += f"❌ Nenhum botão {label.lower()} configurado\n\n"
     
@@ -69,6 +71,10 @@ async def mostrar_menu_edicao_botao(obj, button_id, parent_id, owner_type='canal
         status_icon = "🟢 ATIVO" if btn_info.get('status') == "ATIVO" else "🔴 INATIVO"
         mensagem += f"📊 <b>Status:</b> {status_icon}\n"
     
+    style_map = {"primary": "🔵 Primary", "success": "🟢 Success", "danger": "🔴 Danger", "default": "⚪ Default"}
+    current_style = style_map.get(btn_info.get('style'), "⚪ Default")
+    mensagem += f"🎨 <b>Estilo:</b> {current_style}\n"
+    
     keyboard = []
     # Opção de Toggle (apenas template)
     if owner_type == 'template':
@@ -79,6 +85,8 @@ async def mostrar_menu_edicao_botao(obj, button_id, parent_id, owner_type='canal
         InlineKeyboardButton("✏️ Mudar Nome", callback_data=f"{prefix}_mt_{button_id}"),
         InlineKeyboardButton("🔗 Mudar Link", callback_data=f"{prefix}_mu_{button_id}")
     ])
+    
+    keyboard.append([InlineKeyboardButton("🎨 Mudar Estilo", callback_data=f"{prefix}_style_{button_id}")])
     
     keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data=f"{prefix}_list_{parent_id}")])
     
@@ -144,6 +152,35 @@ async def mostrar_confirmacao_delecao(query, button_id, button_text, owner_type=
         InlineKeyboardButton("❌ Cancelar", callback_data=f"{prefix}_cancel_prompt")
     ]]
     await query.edit_message_text(mensagem, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+async def mostrar_menu_estilos_botao(obj, button_id, parent_id, owner_type='canal'):
+    """Menu para escolher o estilo do botão"""
+    prefix = "global_button_tg" if owner_type == 'canal' else "fix_button_tg"
+    mensagem = "🎨 <b>Escolha o estilo do botão:</b>\n\n"
+    mensagem += "• <b>Default:</b> Cor padrão do app\n"
+    mensagem += "• <b>Primary:</b> Azul (cor de destaque)\n"
+    mensagem += "• <b>Success:</b> Verde (ações positivas)\n"
+    mensagem += "• <b>Danger:</b> Vermelho (ações de aviso/perigo)"
+    
+    styles = [
+        ("⚪ Default", "default"),
+        ("🔵 Primary", "primary"),
+        ("🟢 Success", "success"),
+        ("🔴 Danger", "danger")
+    ]
+    
+    keyboard = []
+    for label, mode in styles:
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"{prefix}_setstyle_{button_id}_{mode}")])
+        
+    keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data=f"{prefix}_edit_{button_id}")])
+    
+    from telegram import CallbackQuery
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if isinstance(obj, CallbackQuery):
+        await obj.edit_message_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await obj.reply_text(mensagem, reply_markup=reply_markup, parse_mode='HTML')
 
 async def notificar_sucesso(message, acao="adicionado", owner_type='canal'):
     """Notifica sucesso em uma operação"""

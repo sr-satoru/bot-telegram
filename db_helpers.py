@@ -160,7 +160,8 @@ async def get_template(template_id: int) -> Optional[Dict]:
         "inline_buttons": [
             {
                 "id": b.id, "text": b.button_text, "url": b.button_url, 
-                "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                "ordem": b.ordem, "status": b.status, 
+                "icon_emoji_id": b.icon_emoji_id, "style": b.button_style
             } 
             for b in t.inline_buttons
         ],
@@ -184,7 +185,8 @@ async def get_templates_by_canal(canal_id: int) -> List[Dict]:
             "inline_buttons": [
                 {
                     "id": b.id, "text": b.button_text, "url": b.button_url, 
-                    "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                    "ordem": b.ordem, "status": b.status, 
+                    "icon_emoji_id": b.icon_emoji_id, "style": b.button_style
                 } 
                 for b in t.inline_buttons
             ],
@@ -214,7 +216,8 @@ async def get_template_with_link_ids(template_id: int) -> Optional[Dict]:
         "inline_buttons": [
             {
                 "id": b.id, "text": b.button_text, "url": b.button_url, 
-                "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                "ordem": b.ordem, "status": b.status, 
+                "icon_emoji_id": b.icon_emoji_id, "style": b.button_style
             } 
             for b in t.inline_buttons
         ],
@@ -244,11 +247,12 @@ async def get_link_info(link_id: int) -> Optional[Tuple]:
 # ──────────────────────────────────────────────
 
 async def save_inline_buttons(template_id: int, buttons: List[Tuple]) -> bool:
-    """Aceita tuplas (text, url) ou (text, url, icon_emoji_id)"""
+    """Aceita tuplas (text, url), (text, url, icon_emoji_id) ou (text, url, icon_emoji_id, style)"""
     await prisma.templateinlinebutton.delete_many(where={"template_id": template_id})
     for i, btn in enumerate(buttons):
         text, url = btn[0], btn[1]
         icon_emoji_id = btn[2] if len(btn) > 2 else None
+        button_style = btn[3] if len(btn) > 3 else None
         await prisma.templateinlinebutton.create(
             data={
                 "template_id": template_id,
@@ -256,6 +260,7 @@ async def save_inline_buttons(template_id: int, buttons: List[Tuple]) -> bool:
                 "button_url": url,
                 "ordem": i + 1,
                 "icon_emoji_id": icon_emoji_id,
+                "button_style": button_style,
             }
         )
     return True
@@ -267,7 +272,8 @@ async def get_inline_buttons(template_id: int) -> List[Dict]:
     return [
         {
             "id": b.id, "text": b.button_text, "url": b.button_url,
-            "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id,
+            "ordem": b.ordem, "status": b.status, 
+            "icon_emoji_id": b.icon_emoji_id, "style": b.button_style,
         }
         for b in buttons
     ]
@@ -283,15 +289,17 @@ async def get_inline_button_info(button_id: int) -> Optional[Dict]:
     return {
         "id": b.id, "template_id": b.template_id,
         "text": b.button_text, "url": b.button_url,
-        "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id,
+        "ordem": b.ordem, "status": b.status, 
+        "icon_emoji_id": b.icon_emoji_id, "style": b.button_style,
     }
 
 async def update_inline_button(button_id: int, data: Dict) -> bool:
-    """Atualiza campos de um botão inline (text, url, icon_emoji_id)"""
+    """Atualiza campos de um botão inline (text, url, icon_emoji_id, style)"""
     update_data = {}
     if "text" in data: update_data["button_text"] = data["text"]
     if "url" in data: update_data["button_url"] = data["url"]
     if "icon_emoji_id" in data: update_data["icon_emoji_id"] = data["icon_emoji_id"]
+    if "style" in data: update_data["button_style"] = data["style"]
 
     result = await prisma.templateinlinebutton.update_many(
         where={"id": button_id},
@@ -323,17 +331,18 @@ async def get_global_buttons(canal_id: int) -> List[Dict]:
     return [
         {
             "id": b.id, "text": b.button_text, "url": b.button_url,
-            "ordem": b.ordem, "icon_emoji_id": b.icon_emoji_id
+            "ordem": b.ordem, "icon_emoji_id": b.icon_emoji_id, "style": b.button_style
         }
         for b in buttons
     ]
 
 async def save_global_buttons(canal_id: int, buttons: List[Tuple]) -> bool:
-    """Aceita tuplas (text, url) ou (text, url, icon_emoji_id)"""
+    """Aceita tuplas (text, url), (text, url, icon_emoji_id) ou (text, url, icon_emoji_id, style)"""
     await prisma.canalglobalbutton.delete_many(where={"canal_id": canal_id})
     for i, btn in enumerate(buttons):
         text, url = btn[0], btn[1]
         icon_emoji_id = btn[2] if len(btn) > 2 else None
+        button_style = btn[3] if len(btn) > 3 else None
         await prisma.canalglobalbutton.create(
             data={
                 "canal_id": canal_id,
@@ -341,6 +350,7 @@ async def save_global_buttons(canal_id: int, buttons: List[Tuple]) -> bool:
                 "button_url": url,
                 "ordem": i + 1,
                 "icon_emoji_id": icon_emoji_id,
+                "button_style": button_style,
             }
         )
     return True
@@ -355,15 +365,17 @@ async def get_global_button_info(button_id: int) -> Optional[Dict]:
         return None
     return {
         "id": b.id, "canal_id": b.canal_id, "text": b.button_text,
-        "url": b.button_url, "ordem": b.ordem, "icon_emoji_id": b.icon_emoji_id
+        "url": b.button_url, "ordem": b.ordem, 
+        "icon_emoji_id": b.icon_emoji_id, "style": b.button_style
     }
 
 async def update_global_button(button_id: int, data: Dict) -> bool:
-    """Atualiza campos de um botão global (text, url, icon_emoji_id)"""
+    """Atualiza campos de um botão global (text, url, icon_emoji_id, style)"""
     update_data = {}
     if "text" in data: update_data["button_text"] = data["text"]
     if "url" in data: update_data["button_url"] = data["url"]
     if "icon_emoji_id" in data: update_data["icon_emoji_id"] = data["icon_emoji_id"]
+    if "style" in data: update_data["button_style"] = data["style"]
     
     result = await prisma.canalglobalbutton.update_many(
         where={"id": button_id},

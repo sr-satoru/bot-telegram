@@ -1,7 +1,7 @@
 from .ui import (
     mostrar_menu_botoes, mostrar_prompt_texto_botao, 
     mostrar_prompt_url_botao, mostrar_confirmacao_delecao, 
-    notificar_sucesso, mostrar_menu_edicao_botao
+    notificar_sucesso, mostrar_menu_edicao_botao, mostrar_menu_estilos_botao
 )
 from .utils import (
     get_any_buttons, save_any_buttons, delete_any_button, get_any_button_info, update_any_button
@@ -39,6 +39,27 @@ async def handle_any_button_callback(query, context, owner_type='canal'):
         await mostrar_menu_botoes(query, parent_id, owner_type)
         return True
         
+    elif data.startswith(f"{prefix}_style_"):
+        button_id = int(data.split("_")[-1])
+        btn_info = await get_any_button_info(button_id, owner_type)
+        if not btn_info: return True
+        
+        parent_id = btn_info.get('canal_id') or btn_info.get('template_id') or btn_info.get('parent_id')
+        await mostrar_menu_estilos_botao(query, button_id, parent_id, owner_type)
+        return True
+
+    elif data.startswith(f"{prefix}_setstyle_"):
+        parts = data.split("_")
+        mode = parts[-1] 
+        button_id = int(parts[-2])
+        
+        await update_any_button(button_id, {"style": mode}, owner_type)
+        btn_info = await get_any_button_info(button_id, owner_type)
+        parent_id = btn_info.get('canal_id') or btn_info.get('template_id') or btn_info.get('parent_id')
+        
+        await mostrar_menu_edicao_botao(query, button_id, parent_id, owner_type, "✅ Estilo do botão atualizado!")
+        return True
+
     elif data.startswith(f"{prefix}_add_"):
         parent_id = int(data.split("_")[-1])
         context.user_data['adicionando_button'] = True
@@ -256,9 +277,9 @@ async def handle_any_button_message(update, context):
             
             # Busca lista atual para adicionar à ela
             current_buttons = await get_any_buttons(parent_id, owner_type)
-            # Lista de tuplas (text, url, icon_emoji_id)
-            updated_list = [(b['text'], b['url'], b.get('icon_emoji_id')) for b in current_buttons]
-            updated_list.append((button_text, url, emoji_id))
+            # Lista de tuplas (text, url, icon_emoji_id, style)
+            updated_list = [(b['text'], b['url'], b.get('icon_emoji_id'), b.get('style')) for b in current_buttons]
+            updated_list.append((button_text, url, emoji_id, None))
             
             await save_any_buttons(parent_id, updated_list, owner_type)
             
