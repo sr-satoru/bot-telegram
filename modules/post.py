@@ -187,7 +187,7 @@ class MediaScheduler:
             where={"canal_id": canal_id},
             order={"ordem": "asc"}
         )
-        return [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem} for b in buttons]
+        return [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "icon_emoji_id": b.icon_emoji_id} for b in buttons]
 
     async def limpar_registros_antigos(self):
         """Remove registros de envios e ciclos antigos (mais de 1 dia)"""

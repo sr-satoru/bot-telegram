@@ -157,7 +157,13 @@ async def get_template(template_id: int) -> Optional[Dict]:
         "template_mensagem": t.template_mensagem,
         "created_at": t.created_at,
         "links": [{"id": l.id, "segmento": l.segmento_com_link, "link": l.link_da_mensagem, "ordem": l.ordem} for l in t.links],
-        "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in t.inline_buttons],
+        "inline_buttons": [
+            {
+                "id": b.id, "text": b.button_text, "url": b.button_url, 
+                "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+            } 
+            for b in t.inline_buttons
+        ],
     }
 
 async def get_templates_by_canal(canal_id: int) -> List[Dict]:
@@ -175,7 +181,13 @@ async def get_templates_by_canal(canal_id: int) -> List[Dict]:
             "template_mensagem": t.template_mensagem,
             "created_at": t.created_at,
             "links": [{"segmento": l.segmento_com_link, "link": l.link_da_mensagem, "ordem": l.ordem} for l in t.links],
-            "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in t.inline_buttons],
+            "inline_buttons": [
+                {
+                    "id": b.id, "text": b.button_text, "url": b.button_url, 
+                    "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+                } 
+                for b in t.inline_buttons
+            ],
         }
         for t in templates
     ]
@@ -199,7 +211,13 @@ async def get_template_with_link_ids(template_id: int) -> Optional[Dict]:
         "id": t.id, "canal_id": t.canal_id,
         "template_mensagem": t.template_mensagem,
         "links": [(l.id, l.segmento_com_link, l.link_da_mensagem, l.ordem) for l in t.links],
-        "inline_buttons": [{"id": b.id, "text": b.button_text, "url": b.button_url, "ordem": b.ordem, "status": b.status} for b in t.inline_buttons],
+        "inline_buttons": [
+            {
+                "id": b.id, "text": b.button_text, "url": b.button_url, 
+                "ordem": b.ordem, "status": b.status, "icon_emoji_id": b.icon_emoji_id
+            } 
+            for b in t.inline_buttons
+        ],
     }
 
 async def update_link(link_id: int, link_url: str) -> bool:
