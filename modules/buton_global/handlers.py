@@ -194,7 +194,13 @@ async def handle_any_button_message(update, context):
                     await message.reply_text("❌ Só é permitido <b>1 emoji premium</b> por botão.\nRemova os extras e tente novamente.", parse_mode='HTML')
                     return True
                 
-                emoji_id = custom_emojis[0].custom_emoji_id if custom_emojis else None
+                emoji_id = None
+                if custom_emojis:
+                    ent = custom_emojis[0]
+                    emoji_id = ent.custom_emoji_id
+                    # Limpa o emoji do texto (UTF-16 safe)
+                    t_utf16 = text.encode('utf-16-le')
+                    text = (t_utf16[:ent.offset*2] + t_utf16[(ent.offset+ent.length)*2:]).decode('utf-16-le').strip()
                 
                 await update_any_button(button_id, {"text": text, "icon_emoji_id": emoji_id}, owner_type)
                 user_data.pop('button_etapa', None)
@@ -224,8 +230,16 @@ async def handle_any_button_message(update, context):
                 await message.reply_text("❌ Só é permitido <b>1 emoji premium</b> por botão.\nRemova os extras e tente novamente.", parse_mode='HTML')
                 return True
             
+            emoji_id = None
+            if custom_emojis:
+                ent = custom_emojis[0]
+                emoji_id = ent.custom_emoji_id
+                # Limpa o emoji do texto (UTF-16 safe)
+                t_utf16 = text.encode('utf-16-le')
+                text = (t_utf16[:ent.offset*2] + t_utf16[(ent.offset+ent.length)*2:]).decode('utf-16-le').strip()
+            
             user_data['button_text'] = text
-            user_data['pending_emoji_id'] = custom_emojis[0].custom_emoji_id if custom_emojis else None
+            user_data['pending_emoji_id'] = emoji_id
             user_data['button_etapa'] = 'url'
             prefix = "global_button_tg" if owner_type == 'canal' else "fix_button_tg"
             await mostrar_prompt_url_botao(message, text, prefix=prefix, context=context)
