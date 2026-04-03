@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
-from modules.utils import require_admin
+from modules.utils import require_admin, strip_html_tags
 from db_helpers import (
     get_media_groups_by_user, get_media_group, delete_media_group,
     create_media_group, update_media_group, add_media_to_group,
@@ -62,9 +62,6 @@ async def mostrar_menu_medias(query, context):
         InlineKeyboardButton("📦 Salvar Grupo (Álbum)", callback_data="salvar_midia_agrupada")
     ])
     
-    keyboard.append([
-        InlineKeyboardButton("🪄 Auto-associar Template", callback_data="associar_template_automatico")
-    ])
     
     keyboard.append([
         InlineKeyboardButton("⬅️ Voltar", callback_data="edit_voltar")
@@ -92,7 +89,9 @@ async def mostrar_detalhes_grupo_midia(query, context, group_id: int):
     if template_id:
         template = await get_template(template_id)
         if template:
-            preview = template['template_mensagem'][:30] + "..." if len(template['template_mensagem']) > 30 else template['template_mensagem']
+            import html
+            clean_text = strip_html_tags(template['template_mensagem'])
+            preview = html.escape(clean_text[:30]) + "..." if len(clean_text) > 30 else html.escape(clean_text)
             mensagem += f"📝 Template: {preview} (ID: {template_id})\n"
         else:
             mensagem += "📝 Template: ID " + str(template_id) + " (Não encontrado)\n"
@@ -274,7 +273,9 @@ async def handle_edit_media_callback(query, context, media_handler, db):
             return True
         keyboard = []
         for t in templates:
-            preview = t['template_mensagem'][:30] + "..."
+            import html
+            clean_text = strip_html_tags(t['template_mensagem'])
+            preview = html.escape(clean_text[:30]) + "..." if len(clean_text) > 30 else html.escape(clean_text)
             keyboard.append([InlineKeyboardButton(f"📄 {preview}", callback_data=f"conf_assoc_temp_{group_id}_{t['id']}")])
         keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data=f"ver_grupo_midia_{group_id}")])
         await query.edit_message_text("📝 Escolha o template:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
@@ -295,22 +296,6 @@ async def handle_edit_media_callback(query, context, media_handler, db):
         await mostrar_detalhes_grupo_midia(query, context, group_id)
         return True
 
-    elif data == "associar_template_automatico":
-        canal_id = context.user_data.get('editando', {}).get('canal_id')
-        templates = await get_templates_by_canal(canal_id)
-        if len(templates) == 1:
-            template_id = templates[0]['id']
-            media_groups = await get_media_groups_by_user(query.from_user.id, canal_id)
-            count = 0
-            for g in media_groups:
-                if not g.get('template_id'):
-                    await update_media_group(g['id'], template_id=template_id)
-                    count += 1
-            await query.answer(f"✅ {count} grupos atualizados!")
-            await mostrar_menu_medias(query, context)
-        else:
-            await query.answer("❌ Use associação manual (múltiplos templates encontrados).", show_alert=True)
-        return True
 
     return False
 

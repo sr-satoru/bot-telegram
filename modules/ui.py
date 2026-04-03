@@ -44,12 +44,13 @@ async def mostrar_menu_edicao(obj, context: ContextTypes.DEFAULT_TYPE, extra_tex
             await obj.reply_text("❌ Erro: dados de edição não encontrados.", parse_mode='HTML')
         return
     
+    import html
     mensagem = extra_text or "🔧 <b>Menu de Edição</b>\n\n"
     if not extra_text:
-        mensagem += f"📢 <b>Nome:</b> {dados['nome']}\n"
+        mensagem += f"📢 <b>Nome:</b> {html.escape(dados['nome'])}\n"
     else:
         # Se tem texto extra (ex: sucesso), o nome já está lá ou adicionamos info compacta
-        mensagem += f"📢 Canal: <b>{dados['nome']}</b>\n"
+        mensagem += f"📢 Canal: <b>{html.escape(dados['nome'])}</b>\n"
         
     mensagem += f"🆔 <b>IDs:</b> {len(dados['ids'])} ID(s)\n"
     mensagem += f"🕒 <b>Horários:</b> {len(dados['horarios'])} horário(s)\n\n"
