@@ -9,6 +9,7 @@ from db_helpers import (
     get_templates_by_canal, get_template, get_global_buttons
 )
 from modules.ui import mostrar_menu_edicao
+from modules.template_auto_utils import processar_e_salvar_template_da_legenda
 
 logger = logging.getLogger(__name__)
 
@@ -182,17 +183,26 @@ async def finalizar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     canal_id = context.user_data.get('canal_id_midia')
     
+    # Captura template automático se a primeira mídia do lote tiver legenda
+    template_id = None
+    if medias_temp:
+        # Nota: Idealmente pegaríamos a legenda da primeira mensagem do lote.
+        # Mas no modo 'agrupada' com /finalizar_grupo, as mensagens individuais já passaram.
+        # Precisamos garantir que armazenamos o template_id no contexto durante o handle_input.
+        template_id = context.user_data.get('template_id_pendente')
+
     group_id = await create_media_group(
         nome=f"Grupo {datetime.now(BRASILIA_TZ).strftime('%d/%m/%Y %H:%M')}",
         user_id=user_id,
-        canal_id=canal_id
+        canal_id=canal_id,
+        template_id=template_id
     )
     
     for ordem, media_id in enumerate(medias_temp, start=1):
         await add_media_to_group(group_id, media_id, ordem=ordem)
     
     # Limpa contexto
-    for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 'medias_temporarias']:
+    for key in ['salvando_midia', 'tipo_midia', 'canal_id_midia', 'medias_temporarias', 'template_id_pendente']:
         context.user_data.pop(key, None)
     
     await mostrar_menu_edicao(update.message, context, extra_text=f"✅ <b>Grupo criado!</b>\n\nID: {group_id}\nMídias: {len(medias_temp)}")
@@ -313,10 +323,14 @@ async def handle_edit_media_input(update: Update, context: ContextTypes.DEFAULT_
         return True
         
     if tipo == 'unica':
+        # Captura template automático da legenda
+        template_id = await processar_e_salvar_template_da_legenda(update.message, canal_id)
+        
         group_id = await create_media_group(
             nome=f"Mídia Solo - {datetime.now(BRASILIA_TZ).strftime('%d/%m/%Y %H:%M')}",
             user_id=update.message.from_user.id,
-            canal_id=canal_id
+            canal_id=canal_id,
+            template_id=template_id
         )
         await add_media_to_group(group_id, media_id, ordem=1)
         
@@ -338,6 +352,11 @@ async def handle_edit_media_input(update: Update, context: ContextTypes.DEFAULT_
         if len(medias) >= 10:
             await update.message.reply_text("❌ Limite de 10 mídias.")
         else:
+            # Se for a primeira mídia do grupo e tiver legenda, salva como template do grupo
+            if len(medias) == 0 and update.message.caption:
+                template_id = await processar_e_salvar_template_da_legenda(update.message, canal_id)
+                context.user_data['template_id_pendente'] = template_id
+
             medias.append(media_id)
             context.user_data['medias_temporarias'] = medias
             await update.message.reply_text(f"✅ Adicionada ({len(medias)}/10). Use /finalizar_grupo para salvar.")
